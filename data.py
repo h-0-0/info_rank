@@ -16,12 +16,10 @@ def mnist_image_preprocess(images: np.ndarray) -> torch.Tensor:
     """
     # We want to unflatten the images and normalize them
     transform = transforms.Compose([
-        transforms.Lambda(lambda x: x.view(-1, 28, 28)),  # Unflatten the tensor
+        transforms.Lambda(lambda x: x.view(-1, 1, 28, 28)),  # Unflatten the tensor
         transforms.Normalize((0.1307,), (0.3081,)),  # Normalize pixel values
     ])
-    print(images.shape)
-    images = torch.tensor(images)
-    print(images.shape)
+    images = torch.tensor(images, dtype=torch.float32)
     images_normalized = transform(images)
     return images_normalized
 
@@ -41,8 +39,8 @@ def fetch_data_partition(partition: str) -> Tuple[torch.Tensor, torch.Tensor, to
     # Load the data and return it
     images = np.load(f'data/data_wr_{partition}.npy')
     images = mnist_image_preprocess(images) # Normalize the images
-    audio = torch.from_numpy(np.load(f'data/data_sp_{partition}.npy')) # Audio already pre-processed, just need to turn into tensor
-    labels = torch.from_numpy(np.load(f'data/labels_{partition}.npy'))
+    audio = torch.tensor(np.load(f'data/data_sp_{partition}.npy'), dtype=torch.float32).reshape(-1, 13, 39) # Audio already pre-processed, just need to turn into tensor
+    labels = torch.tensor(np.load(f'data/labels_{partition}.npy'), dtype=torch.long)
     return images, audio, labels
 
 def get_data() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -60,6 +58,22 @@ def get_data() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, 
     images_test, audio_test, labels_test = fetch_data_partition('test')
     return images_train, audio_train, labels_train, images_test, audio_test, labels_test
 
+def get_data_loaders(batch_size:int=32) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+    """
+    Returns the data loaders for the training and test partitions.
+
+    Returns:
+        - train_loader (torch.utils.data.DataLoader): The data loader for the training partition
+        - test_loader (torch.utils.data.DataLoader): The data loader for the test partition
+
+    """
+    # Load the data
+    images_train, audio_train, labels_train, images_test, audio_test, labels_test = get_data()
+    # Create the data loaders
+    train_loader = torch.utils.data.DataLoader(list(zip(images_train, audio_train, labels_train)), batch_size=batch_size, shuffle=True)
+    test_loader = torch.utils.data.DataLoader(list(zip(images_test, audio_test, labels_test)), batch_size=batch_size, shuffle=True)
+    return train_loader, test_loader
+
 if __name__ == '__main__':
     """
     Following code is for testing the data fetching and pre-processing functions, simply run this file to test them.
@@ -74,7 +88,7 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     fig, axs = plt.subplots(2, 5, figsize=(15, 6))
     for i in range(5):
-        axs[0, i].imshow(images_train[i])
+        axs[0, i].imshow(images_train[i][0])
         axs[0, i].set_title(f"Label: {labels_train[i]}")
         axs[1, i].plot(audio_train[i])
     import os
