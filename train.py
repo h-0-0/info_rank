@@ -59,7 +59,7 @@ def train(**kwargs):
         raise ValueError("Invalid benchmark")
     
     if model == "FusionModel":
-        model = FusionModel(output_dim=64)
+        model = FusionModel()
     else:
         raise ValueError("Invalid model")
     model = model.to(device)

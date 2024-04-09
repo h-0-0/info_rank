@@ -52,12 +52,13 @@ class FusionModel(nn.Module):
         super(FusionModel, self).__init__()
         self.image_encoder = MNIST_Image_CNN()
         self.audio_encoder = MNIST_Audio_CNN()
+        self.W = nn.Parameter(torch.randn(64, 64))
         
         # Assuming the output dimensions of the image and audio encoders are 50 and 32 respectively
         self.fusion_mlp = nn.Sequential(
             nn.Linear(128 + 128, 128),
             nn.ReLU(),
-            nn.Linear(128, 1)
+            nn.Linear(128, 64),
         )
 
     def forward(self, image, audio):
@@ -66,9 +67,13 @@ class FusionModel(nn.Module):
         fused_repr = torch.cat((image_repr, audio_repr), dim=1)
         output = self.fusion_mlp(fused_repr)
         return output
+    
+    def score(self, u, v, temperature):
+        return torch.matmul(u, torch.matmul(self.W, v.t()))  #/ temperature
+    # TODO: Temperature applied correctly? / Should maybe get rid of it?
 
 class LinearClassifier(nn.Module):
-    """ Linear layer we will train as a classifier on top of the represertations from the MLP."""
+    """ Linear layer we will train as a classifier on top of the representations from the MLP."""
     def __init__(self, input_dim, output_dim):
         super().__init__()
         self.input_dim = input_dim
