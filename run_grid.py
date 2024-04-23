@@ -31,7 +31,7 @@ if  __name__ == "__main__":
     }
 
     to_grid ={
-        'learning_rate': [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7],
+        'learning_rate': [1e-1, 1e-2, 1e-3, 1e-5, 1e-7, 1e-9, 1e-11, 1e-13, 1e-15],
     }
     
     grid = slune.searchers.SearcherGrid(to_grid)

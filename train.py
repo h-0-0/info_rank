@@ -8,8 +8,8 @@ from tensorboardX import SummaryWriter
 from utils import dict_to_ls
 import slune
 import os
-from model import FusionModel, LinearClassifier
-from loss import info_rank_loss
+from model import FusionModel, LinearClassifier, MNIST_Image_CNN, MNIST_Audio_CNN, MNIST_Image_CNN2, MNIST_Image_CNN3, MNIST_Audio_CNN2, MNIST_Audio_CNN3
+from loss import info_rank_loss, SimCLR_loss
 
 def train(**kwargs):
     """
@@ -60,6 +60,18 @@ def train(**kwargs):
     
     if model == "FusionModel":
         model = FusionModel()
+    elif model == "MNIST_Image_CNN":
+        model = MNIST_Image_CNN()
+    elif model == "MNIST_Image_CNN2":
+        model = MNIST_Image_CNN2()
+    elif model == "MNIST_Image_CNN3":
+        model = MNIST_Image_CNN3()
+    elif model == "MNIST_Audio_CNN":
+        model = MNIST_Audio_CNN()
+    elif model == "MNIST_Audio_CNN2":
+        model = MNIST_Audio_CNN2()
+    elif model == "MNIST_Audio_CNN3":
+        model = MNIST_Audio_CNN3()
     else:
         raise ValueError("Invalid model")
     model = model.to(device)
@@ -68,6 +80,8 @@ def train(**kwargs):
     # Define the loss function based on the estimator
     if est == "info_rank":
         loss_fun = info_rank_loss
+    elif est == "SimCLR":
+        loss_fun = SimCLR_loss
     else:
         raise ValueError("Invalid est(imator)")
     
@@ -112,7 +126,7 @@ def train(**kwargs):
         else:
             patience_counter += 1
             if patience_counter >= patience:
-                print("Early stopping", flush=True)
+                print("Early stopping at epoch:"+str(epoch+1), flush=True)
                 break
 
     # Now that we have trained the model, we evaluate it by training a linear classifier on top of the frozen representations
@@ -133,10 +147,7 @@ def train(**kwargs):
             optimizer.zero_grad()
 
             # Forward pass
-            if est == "info_rank":
-                rep = model(image_batch, audio_batch)
-            else:
-                raise ValueError("Invalid est(imator)")
+            rep = model(image_batch, audio_batch)
             logits = linear_classifier(rep)
             loss = nn.CrossEntropyLoss()(logits, label_batch)
             writer.add_scalar('Eval/train_loss', loss.item(), cum_b)
@@ -164,10 +175,7 @@ def train(**kwargs):
     with torch.no_grad():
         for image_test, audio_test, label_test in test_loader:
             image_test, audio_test, label_test = image_test.to(device), audio_test.to(device), label_test.to(device)
-            if est == "info_rank":
-                rep = model(image_test, audio_test)
-            else:
-                raise ValueError("Invalid est(imator)")
+            rep = model(image_test, audio_test)
             logits = linear_classifier(rep)
             loss = nn.CrossEntropyLoss()(logits, label_test)
             total_loss += loss.item() * image_test.size(0)  # Multiply by batch size
@@ -187,25 +195,22 @@ def train(**kwargs):
     saver.save_collated()
     return losses, model
 
-# Main function used to execute a training example and visualize results, use --default_exp_name to specify which example to run
-# Use: python train.py --default_exp_name=bi_nce
-    # To run the bi-NCE example
-# Use: python train.py --default_exp_name=info_nce
-    # To run the info-NCE example
+# Main function used to execute a training example and visualize results, use --est to specify which estimator to use in training run
+
 if __name__ == "__main__":
     #  Parse input from command line
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--default_exp_name', type=str, help='Name of the example experiment you want to run, currenly only info_rank', default="info_rank")
+    parser.add_argument('--est', type=str, help='Name of the estimator you want to use, currenly only info_rank or SimCLR', default="info_rank")
     args = parser.parse_args()
     config = {
         'benchmark': 'written_spoken_digits',
-        'model': 'FusionModel',
-        'learning_rate': 1e-7,
+        'model': 'MNIST_Audio_CNN',
+        'learning_rate': 1e-4,
         'num_epochs': 200,
-        'batch_size': 512,
-        'est': args.default_exp_name,
-        'patience': 5,
+        'batch_size': 256,
+        'est': args.est,
+        'patience': 10,
         'temperature': 0.1,
     }
     # Train the model

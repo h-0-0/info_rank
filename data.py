@@ -39,7 +39,7 @@ def fetch_data_partition(partition: str) -> Tuple[torch.Tensor, torch.Tensor, to
     # Load the data and return it
     images = np.load(f'data/data_wr_{partition}.npy')
     images = mnist_image_preprocess(images) # Normalize the images
-    audio = torch.tensor(np.load(f'data/data_sp_{partition}.npy'), dtype=torch.float32).reshape(-1, 13, 39) # Audio already pre-processed, just need to turn into tensor
+    audio = torch.tensor(np.load(f'data/data_sp_{partition}.npy'), dtype=torch.float32).reshape(-1, 1, 39, 13) # Audio already pre-processed, just need to turn into tensor
     labels = torch.tensor(np.load(f'data/labels_{partition}.npy'), dtype=torch.long)
     return images, audio, labels
 
@@ -90,12 +90,17 @@ if __name__ == '__main__':
     for i in range(5):
         axs[0, i].imshow(images_train[i][0])
         axs[0, i].set_title(f"Label: {labels_train[i]}")
-        axs[1, i].plot(audio_train[i])
+        axs[1, i].imshow(audio_train[i][0])
     import os
     if not os.path.exists('viz'):
         os.makedirs('viz')
     plt.savefig('viz/data_sample.png')
-    # Save some of the audio in listenable format, is pre-processed so it will sound like a beep
-    from scipy.io.wavfile import write
+
+    # Now augment some of the data and plot it
+    from loss import aug
+    image1, audio1, image2, audio2 = aug(images_train, audio_train)
+    fig, axs = plt.subplots(2, 5, figsize=(15, 6))
     for i in range(5):
-        write(f'viz/audio_sample_{i}.wav', 44100, audio_train[i].numpy())  # Assuming a sample rate of 44100 Hz
+        axs[0, i].imshow(image1[i][0])
+        axs[1, i].imshow(audio1[i][0])
+    plt.savefig('viz/data_augmented_sample.png')

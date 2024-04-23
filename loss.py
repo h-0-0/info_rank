@@ -4,9 +4,15 @@ import torch
 from torchvision import transforms as iT
 from torchaudio import transforms as aT
 
+def cosine_sim(y, temperature=0.1):
+    """ Scoring function (cosine similarity)."""
+    y_norm = F.normalize(y, dim=-1)
+    similarity_matrix = torch.matmul(y_norm, y_norm.T) / temperature
+    return similarity_matrix
+
 def image_aug(x):
     """
-    Returns augmentation function for images.
+    Returns augmentation function for tensors of images.
     """
     augmentations = iT.Compose([
         iT.RandomRotation(10),
@@ -14,17 +20,22 @@ def image_aug(x):
         iT.RandomResizedCrop(28, scale=(0.8, 1.0), antialias=True),
         # transforms.Lambda(lambda x: x.view(x.size(0), -1)),  # Flatten the image while keeping the first dimension
     ])
-    return augmentations(x)
+    # if len(x.shape) == 4: 
+    #     aug_x = torch.stack([augmentations(x_i) for x_i in x]) # Would like to apply fresh augmentations to each image
+    # else:
+    #     aug_x = augmentations(x)
+    aug_x = augmentations(x)
+    return aug_x
+# TODO: Speed up above, think it's not optimal
 
 def audio_aug(x):
     """
     Returns augmentation function for audio.
     """
+    # augmentations = iT.Lambda(lambda x: x)
     augmentations = nn.Sequential(
-        aT.TimeMasking(time_mask_param=10),  # apply time masking
-        aT.FrequencyMasking(freq_mask_param=5),  # apply frequency masking
-        # aT.TimeStretch(n_freq=13),  # apply time stretching
-        # transforms.Lambda(lambda x: x.view(x.size(0), -1)),  # Flatten the audio while keeping the first dimension
+        aT.TimeMasking(time_mask_param=10, p=0.2, iid_masks=True),  # apply time masking
+        aT.FrequencyMasking(freq_mask_param=4, iid_masks=True),  # apply frequency masking
     )
     return augmentations(x)
 
@@ -63,11 +74,43 @@ def info_rank_loss(model, image_batch, audio_batch, temperature, device):
     loss3 = F.cross_entropy(score3, torch.empty(score3.shape[0], dtype=torch.long).fill_(3).to(device), reduction='mean')
     # We then sum the losses and return them
     loss = (loss0 + loss1 + loss2 + loss3) / 4
-    print(loss)
     return loss
+
+def SimCLR_loss(model, image_batch, audio_batch, temperature, device):
+    # Augment each sample twice (for both modalities)
+    image1, audio1, image2, audio2 = aug(image_batch, audio_batch)
+    y1, y2 = model(image1, audio1), model(image2, audio2)
+
+    # Combine y1 and y2
+    y = torch.cat([y1, y2], dim=0)
+    
+    # Compute the scores
+    scores = cosine_sim(y, temperature)
+
+    # Compute labels 
+    labels = torch.cat([torch.arange(image1.shape[0]) for i in range(2)], dim=0).to(device)
+    labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+
+    # Mask the diagonal elements
+    mask = torch.eye(labels.shape[0], dtype=torch.bool)
+    labels = labels[~mask].view(labels.shape[0], -1)
+    scores = scores[~mask].view(scores.shape[0], -1)
+
+    # Select the positive and negative samples based on the labels
+    positives = scores[labels.bool()].view(labels.shape[0], -1)
+    negatives = scores[~labels.bool()].view(scores.shape[0], -1)
+
+    # Concatenate the positives and negatives
+    logits = torch.cat([positives, negatives], dim=1)
+
+    # Compute the loss
+    return nn.CrossEntropyLoss()(logits, labels)
 
 # TODO:
     # Should we average the losses?
     # Do we need to weigh with pi_c's in the cross entropy loss?
     # Softmax?
     # Exponential? / Logarithm?
+
+    #Need to check everything being loaded onto GP
+    # Related to this should profile and check everything is speedy as can be
