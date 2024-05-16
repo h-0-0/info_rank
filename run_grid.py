@@ -31,10 +31,12 @@ if  __name__ == "__main__":
     }
 
     to_grid ={
-        'learning_rate': [1e-1, 1e-2, 1e-3, 1e-5, 1e-7, 1e-9, 1e-11, 1e-13, 1e-15],
+        'learning_rate': [1e-7, 1e-9, 1e-11, 1e-13, 1e-15],
     }
-    
-    grid = slune.searchers.SearcherGrid(to_grid)
+    print("Constants: ", config, flush=True)
+    print("Searching Over: ", to_grid, flush=True)
+    grid = slune.searchers.SearcherGrid(to_grid, runs=1)
+    grid.check_existing_runs(slune.get_csv_saver(root_dir='results'))
     for g in grid:
         # Add the net to the config
         g = ls_to_dict(g)
@@ -43,7 +45,7 @@ if  __name__ == "__main__":
         losses, model = train(**config)
         # Create save location using slune
         saver = slune.get_csv_saver(root_dir='results')
-        print("path: ", config)
+        print("path: ", config, flush=True)
         path = os.path.dirname(saver.get_path(dict_to_ls(**config)))
 
         # Plot the loss

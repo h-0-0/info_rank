@@ -50,7 +50,7 @@ def aug(images, audio):
 
 def info_rank_loss(model, image_batch, audio_batch, temperature, device):
     image1, audio1, image2, audio2 = aug(image_batch, audio_batch)
-    # Create u, the anchors (may augment this later)
+    # Create u, the anchors
     u = model(image1 , audio1)
     # Create v0, the positive samples p(y|x_1,x_2)
     v0 = model(image2, audio2)
@@ -66,6 +66,7 @@ def info_rank_loss(model, image_batch, audio_batch, temperature, device):
     score1 = model.score(u, v1, temperature)
     score2 = model.score(u, v2, temperature)
     score3 = model.score(u, v3, temperature)
+    # TODO: rename energy instead of score?
 
     # We then compute the cross entropy loss between the scores and the correct logits
     loss0 = F.cross_entropy(score0, torch.empty(score0.shape[0], dtype=torch.long).fill_(0).to(device), reduction='mean')
@@ -75,6 +76,49 @@ def info_rank_loss(model, image_batch, audio_batch, temperature, device):
     # We then sum the losses and return them
     loss = (loss0 + loss1 + loss2 + loss3) / 4
     return loss
+
+def info_rank_plus_loss(model, image_batch, audio_batch, temperature, device):
+    image1, audio1, image2, audio2 = aug(image_batch, audio_batch)
+    images = torch.cat([image1, image2], dim=0)
+    audios = torch.cat([audio1, audio2], dim=0)
+
+    n = len(image_batch)
+    k = 1 # Num of negatives per anchor
+    loss = []
+    for i in range(2*n):
+        # Get samples
+        anchor = images[i%(2*n)], audios[i%(2*n)]
+
+        positive = images[(n+i)%(2*n)], audios[(n+i)%(2*n)]
+
+        possible_neg_idxs = [j for j in range(2*n) if j not in [i%(2*n), (n+i)%(2*n)]] 
+
+        neg_idxs =  possible_neg_idxs[torch.randperm(len(possible_neg_idxs))[:k]]
+        negatives = images[neg_idxs], audios[neg_idxs]
+
+        zero_dist_idxs = possible_neg_idxs[torch.randperm(len(possible_neg_idxs))[:k]]
+        zero_disturbed = images[zero_dist_idxs], torch.cat(k*[anchor[1]])
+
+        one_dist_idxs = possible_neg_idxs[torch.randperm(len(possible_neg_idxs))[:k]]
+        one_disturbed = torch.cat(k*[anchor[0]]), audios[one_dist_idxs]
+
+        # Get encodings
+        input_images = torch.stack([anchor[0], positive[0], negatives[0], zero_disturbed[0], one_disturbed[0]])
+        input_audios = torch.stack([anchor[1], positive[1], negatives[1], zero_disturbed[1], one_disturbed[1]])
+        encodings = model(input_images, input_audios)
+
+        # Get scores
+        score_pos = F.cosine_similarity(encodings[0], encodings[1:2]) /temperature
+        score_neg = F.cosine_similarity(encodings[0], encodings[2:2+k]) /temperature
+        score_zero_dist = F.cosine_similarity(encodings[0], encodings[2+k:2+2*k]) /temperature
+        score_one_dist = F.cosine_similarity(encodings[0], encodings[2+2*k:2+3*k]) /temperature
+        
+        # Get loss
+        S = torch.column_stack([score_pos, score_neg, score_zero_dist, score_one_dist])
+        loss.append(torch.stack([F.cross_entropy(S, torch.ones(S.shape[0]).long().to(device) *c) for c in range(4)]).mean())
+    return torch.stack(loss).mean()
+# TODO: increase k from 1 and repeat positives 
+# TODO: change from cosine similarity to learnable
 
 def SimCLR_loss(model, image_batch, audio_batch, temperature, device):
     # Augment each sample twice (for both modalities)

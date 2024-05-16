@@ -8,8 +8,8 @@ from tensorboardX import SummaryWriter
 from utils import dict_to_ls
 import slune
 import os
-from model import FusionModel, LinearClassifier, MNIST_Image_CNN, MNIST_Audio_CNN, MNIST_Image_CNN2, MNIST_Image_CNN3, MNIST_Audio_CNN2, MNIST_Audio_CNN3
-from loss import info_rank_loss, SimCLR_loss
+from model import FusionModel, LinearClassifier, FusionModelStrict, FusionModelStrictShallow
+from loss import info_rank_loss, SimCLR_loss, info_rank_plus_loss
 
 def train(**kwargs):
     """
@@ -60,18 +60,22 @@ def train(**kwargs):
     
     if model == "FusionModel":
         model = FusionModel()
-    elif model == "MNIST_Image_CNN":
-        model = MNIST_Image_CNN()
-    elif model == "MNIST_Image_CNN2":
-        model = MNIST_Image_CNN2()
-    elif model == "MNIST_Image_CNN3":
-        model = MNIST_Image_CNN3()
-    elif model == "MNIST_Audio_CNN":
-        model = MNIST_Audio_CNN()
-    elif model == "MNIST_Audio_CNN2":
-        model = MNIST_Audio_CNN2()
-    elif model == "MNIST_Audio_CNN3":
-        model = MNIST_Audio_CNN3()
+    elif model == "ImageOnly":
+        model = FusionModel(single_modality="image")
+    elif model == "AudioOnly":
+        model = FusionModel(single_modality="audio")
+    elif model == "FusionModelStrict":
+        model = FusionModelStrict()
+    elif model == "ImageOnlyStrict":
+        model = FusionModelStrict(single_modality="image")
+    elif model == "AudioOnlyStrict":   
+        model = FusionModelStrict(single_modality="audio")
+    elif model == "FusionModelStrictShallow":
+        model = FusionModelStrictShallow()
+    elif model == "ImageOnlyStrictShallow":
+        model = FusionModelStrictShallow(single_modality="image")
+    elif model == "AudioOnlyStrictShallow":
+        model = FusionModelStrictShallow(single_modality="audio")
     else:
         raise ValueError("Invalid model")
     model = model.to(device)
@@ -80,6 +84,8 @@ def train(**kwargs):
     # Define the loss function based on the estimator
     if est == "info_rank":
         loss_fun = info_rank_loss
+    elif est == "info_rank_plus":
+        loss_fun = info_rank_plus_loss
     elif est == "SimCLR":
         loss_fun = SimCLR_loss
     else:
@@ -131,7 +137,8 @@ def train(**kwargs):
 
     # Now that we have trained the model, we evaluate it by training a linear classifier on top of the frozen representations
     # Define the linear classifier
-    linear_classifier = LinearClassifier(64, 10).to(device)
+    # Find output size of network
+    linear_classifier = LinearClassifier(model.output_dim, 10).to(device)
     learning_rate = 0.1 * batch_size / 256
     optimizer = optim.SGD(linear_classifier.parameters(), lr=learning_rate)
     for param in model.parameters():
@@ -201,11 +208,11 @@ if __name__ == "__main__":
     #  Parse input from command line
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--est', type=str, help='Name of the estimator you want to use, currenly only info_rank or SimCLR', default="info_rank")
+    parser.add_argument('--est', type=str, help='Name of the estimator you want to use, currenly only info_rank or SimCLR', default="info_rank_plus")
     args = parser.parse_args()
     config = {
         'benchmark': 'written_spoken_digits',
-        'model': 'MNIST_Audio_CNN',
+        'model': 'FusionModel',
         'learning_rate': 1e-4,
         'num_epochs': 200,
         'batch_size': 256,
