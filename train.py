@@ -8,8 +8,8 @@ from tensorboardX import SummaryWriter
 from utils import dict_to_ls
 import slune
 import os
-from model import FusionModel, LinearClassifier, FusionModelStrict, FusionModelStrictShallow
-from loss import info_rank_loss, SimCLR_loss, info_rank_plus_loss
+from model import FusionModel, LinearClassifier, StrictFusionModel, ShallowStrictFusionModel
+from loss import SimCLR_loss, info_critic, info_critic_plus, info_rank, info_rank_plus, prob_loss, decomposed_loss
 
 def train(**kwargs):
     """
@@ -39,6 +39,8 @@ def train(**kwargs):
     batch_size = kwargs['batch_size']
     est = kwargs['est']
     patience = kwargs['patience']
+    if patience < 0:
+        patience = None
     temperature = kwargs['temperature']
 
     # Create save location using slune and tensorboard writer
@@ -56,7 +58,7 @@ def train(**kwargs):
     if benchmark == "written_spoken_digits":
         train_loader, test_loader = get_data_loaders(batch_size=batch_size)
     else:
-        raise ValueError("Invalid benchmark")
+        raise ValueError("Invalid benchmark: {}".format(benchmark))
     
     if model == "FusionModel":
         model = FusionModel()
@@ -64,28 +66,36 @@ def train(**kwargs):
         model = FusionModel(single_modality="image")
     elif model == "AudioOnly":
         model = FusionModel(single_modality="audio")
-    elif model == "FusionModelStrict":
-        model = FusionModelStrict()
-    elif model == "ImageOnlyStrict":
-        model = FusionModelStrict(single_modality="image")
-    elif model == "AudioOnlyStrict":   
-        model = FusionModelStrict(single_modality="audio")
-    elif model == "FusionModelStrictShallow":
-        model = FusionModelStrictShallow()
-    elif model == "ImageOnlyStrictShallow":
-        model = FusionModelStrictShallow(single_modality="image")
-    elif model == "AudioOnlyStrictShallow":
-        model = FusionModelStrictShallow(single_modality="audio")
+    elif model == "StrictFusionModel":
+        model = StrictFusionModel()
+    elif model == "StrictImageOnly":
+        model = StrictFusionModel(single_modality="image")
+    elif model == "StrictAudioOnly":   
+        model = StrictFusionModel(single_modality="audio")
+    elif model == "ShallowStrictFusionModel":
+        model = ShallowStrictFusionModel()
+    elif model == "ShallowStrictImageOnly":
+        model = ShallowStrictFusionModel(single_modality="image")
+    elif model == "ShallowStrictAudioOnly":
+        model = ShallowStrictFusionModel(single_modality="audio")
     else:
         raise ValueError("Invalid model")
     model = model.to(device)
     optimizer = optim.SGD(model.parameters(), lr=learning_rate)
 
     # Define the loss function based on the estimator
-    if est == "info_rank":
-        loss_fun = info_rank_loss
+    if est == "info_critic":
+        loss_fun = info_critic
+    elif est == "info_critic_plus":
+        loss_fun = info_critic_plus
+    elif est == "info_rank":
+        loss_fun = info_rank
     elif est == "info_rank_plus":
-        loss_fun = info_rank_plus_loss
+        loss_fun = info_rank_plus
+    elif est == "prob_loss":
+        loss_fun = prob_loss
+    elif est == "decomposed_loss":
+        loss_fun = decomposed_loss
     elif est == "SimCLR":
         loss_fun = SimCLR_loss
     else:
@@ -98,8 +108,17 @@ def train(**kwargs):
 
     # Train the model
     cum_b = -1
-    for epoch in range(num_epochs):
+    epoch_losses = []
+    batch_stop = len(train_loader)
+    if  1 > num_epochs > 0:
+        batch_stop = num_epochs * len(train_loader)
+        num_epochs = 1
+    num_epochs = int(num_epochs)
+    for e, epoch in enumerate(range(num_epochs)):
         for b, (image_batch, audio_batch, label_batch) in enumerate(train_loader):
+            if b >= batch_stop:
+                break
+            # Increment the batch counter
             cum_b += 1
             image_batch, audio_batch = image_batch.to(device), audio_batch.to(device)
             # Zero the gradients
@@ -108,6 +127,7 @@ def train(**kwargs):
             # Forward pass
             loss = loss_fun(model, image_batch, audio_batch, temperature, device)
             losses.append(loss.item())
+            epoch_losses.append(loss.item())
             writer.add_scalar('Loss/train', loss.item(), cum_b)
             saver.log({'train_loss': loss.item()})
 
@@ -124,10 +144,17 @@ def train(**kwargs):
             # Print progress
             print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}', flush=True)
 
+        # Avg. epoch loss
+        avg_loss = np.mean(epoch_losses)
+        writer.add_scalar('Loss/epoch_avg_train', avg_loss, e)
+        saver.log({'train_loss_epoch_avg': avg_loss})
+        epoch_losses = []
 
         # Early stopping
-        if loss.item() < best_loss:
-            best_loss = loss.item()
+        if patience is None:
+            pass
+        elif avg_loss < best_loss:
+            best_loss = avg_loss
             patience_counter = 0
         else:
             patience_counter += 1
@@ -152,7 +179,6 @@ def train(**kwargs):
             image_batch, audio_batch, label_batch = image_batch.to(device), audio_batch.to(device), label_batch.to(device)
             # Zero the gradients
             optimizer.zero_grad()
-
             # Forward pass
             rep = model(image_batch, audio_batch)
             logits = linear_classifier(rep)
@@ -208,16 +234,16 @@ if __name__ == "__main__":
     #  Parse input from command line
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--est', type=str, help='Name of the estimator you want to use, currenly only info_rank or SimCLR', default="info_rank_plus")
+    parser.add_argument('--est', type=str, help='Name of the estimator you want to use, currenly only info_rank or SimCLR', default="info_critic")
     args = parser.parse_args()
     config = {
         'benchmark': 'written_spoken_digits',
         'model': 'FusionModel',
         'learning_rate': 1e-4,
-        'num_epochs': 200,
+        'num_epochs': 0,
         'batch_size': 256,
         'est': args.est,
-        'patience': 10,
+        'patience': -1,
         'temperature': 0.1,
     }
     # Train the model
