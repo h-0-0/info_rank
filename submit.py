@@ -8,7 +8,7 @@ if  __name__ == "__main__":
             # 'StrictFusionModel', 'StrictAudioOnly', 'StrictImageOnly',
             # 'ShallowStrictFusionModel', 'ShallowStrictAudioOnly', 'ShallowStrictImageOnly',
             ],
-        'num_epochs': [0, 0.1, 0.2, 0.4, 0.8],
+        'num_epochs': [0, 1, 10, 100, 200],
         'batch_size': [128],
         'est': ['SimCLR', 'info_critic'],  #'prob_loss', 'decomposed_loss', 'info_rank', 'info_rank_plus' #'SimCLR',  'info_critic', 'info_critic_plus'
         'patience': [-1],

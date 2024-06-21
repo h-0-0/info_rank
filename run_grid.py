@@ -40,16 +40,15 @@ if  __name__ == "__main__":
     }
     print("Searching Over: ", config, flush=True)
     grid = slune.searchers.SearcherGrid(config, runs=1)
-    grid.check_existing_runs(slune.get_csv_saver(root_dir='results'))
+    # grid.check_existing_runs(slune.get_csv_saver(root_dir='results'))
     for g in grid:
         # Add the net to the config
-        g = ls_to_dict(g)
         # Train the model
         losses, model = train(**g)
         # Create save location using slune
-        saver = slune.get_csv_saver(root_dir='results')
+        saver = slune.get_csv_saver(root_dir='results', params=g)
         print("path: ", g, flush=True)
-        path = os.path.dirname(saver.get_path(dict_to_ls(**g)))
+        path = os.path.dirname(saver.getset_current_path())
 
         # Plot the loss
         plt.figure()

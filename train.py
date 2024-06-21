@@ -44,9 +44,8 @@ def train(**kwargs):
     temperature = kwargs['temperature']
 
     # Create save location using slune and tensorboard writer
-    formatted_args = dict_to_ls(**kwargs)
-    saver = slune.get_csv_saver(formatted_args, root_dir='results')
-    path = os.path.dirname(saver.get_current_path())
+    saver = slune.get_csv_saver(kwargs, root_dir='results')
+    path = os.path.dirname(saver.getset_current_path())
     writer = SummaryWriter(path)    
 
     # Check if CUDA is available and set the device accordingly
@@ -180,7 +179,8 @@ def train(**kwargs):
             # Zero the gradients
             optimizer.zero_grad()
             # Forward pass
-            rep = model(image_batch, audio_batch)
+            with torch.no_grad():
+                rep = model(image_batch, audio_batch)
             logits = linear_classifier(rep)
             loss = nn.CrossEntropyLoss()(logits, label_batch)
             writer.add_scalar('Eval/train_loss', loss.item(), cum_b)

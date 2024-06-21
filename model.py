@@ -6,15 +6,15 @@ from torchvision import transforms
 class MNIST_Image_CNN(nn.Module):
     def __init__(self):
         super(MNIST_Image_CNN, self).__init__()
+        self.output_dim = 64
+
         self.conv1 = nn.Conv2d(1, 32, kernel_size=5)
         self.bnorm1 = nn.BatchNorm2d(32)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=5)
         self.bnorm2 = nn.BatchNorm2d(64)
-        self.fc1 = nn.Linear(1024, 128) 
+        self.fc1 = nn.Linear(1024, self.output_dim) 
 
-        self.output_dim = 128
-
-        self.W = nn.Parameter(torch.randn(128, 128))
+        self.W = nn.Parameter(torch.randn(self.output_dim, self.output_dim))
 
     def forward(self, image, audio):
         x, _ = image, audio
@@ -55,13 +55,13 @@ class MLP(nn.Module):
 class MNIST_Audio_CNN(nn.Module):
     def __init__(self):
         super(MNIST_Audio_CNN, self).__init__()
+        self.output_dim = 64
+
         self.conv1 = nn.Conv2d(1, 32, kernel_size=(3,3), stride=1)  
         self.conv2 = nn.Conv2d(32, 32, kernel_size=(3,3), stride=2)  
-        self.fc1 = nn.Linear(11520, 128) 
+        self.fc1 = nn.Linear(11520, self.output_dim) 
 
-        self.output_dim = 128
-
-        self.W = nn.Parameter(torch.randn(128, 128))
+        self.W = nn.Parameter(torch.randn(self.output_dim, self.output_dim))
 
     def forward(self, image, audio):
         _, x = image, audio
@@ -80,7 +80,7 @@ class FusionModel(nn.Module):
     def __init__(self, single_modality=None):
         super(FusionModel, self).__init__()
 
-        self.output_dim = 128
+        self.output_dim = 64
         
         self.image_encoder = MNIST_Image_CNN()
         self.audio_encoder = MNIST_Audio_CNN() 
@@ -94,9 +94,9 @@ class FusionModel(nn.Module):
         # Assuming the output dimensions of the image and audio encoders are 50 and 32 respectively
         self.fusion_mlp = nn.Sequential(
             nn.ReLU(),
-            nn.Linear(256, 128),
+            nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Linear(128, self.output_dim),
+            nn.Linear(64, self.output_dim),
         )
 
         self.critic = nn.Sequential(
