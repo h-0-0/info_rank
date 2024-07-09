@@ -48,7 +48,7 @@ def aug(images, audio):
     audio2 = audio_aug(audio)
     return image1, audio1, image2, audio2
 
-def info_critic(model, image_batch, audio_batch, temperature, device):
+def info_critic(model, image_batch, audio_batch, temperature, device, acc=False):
     image1, audio1, image2, audio2 = aug(image_batch, audio_batch)
     # Create u, the anchors
     u = model(image1 , audio1)
@@ -68,6 +68,13 @@ def info_critic(model, image_batch, audio_batch, temperature, device):
     score3 = model.score(u, v3)
     # TODO: rename energy instead of score?
 
+    if acc:
+        # Compute accuracy
+        predictions = torch.cat([score0, score1, score2, score3], dim=0).argmax(dim=1)
+        labels = torch.cat([torch.zeros(score0.shape[0]), torch.ones(score1.shape[0]), 2*torch.ones(score2.shape[0]), 3*torch.ones(score3.shape[0])], dim=0).to(device)
+        accuracy = (predictions == labels).float().mean()
+        return accuracy
+
     # We then compute the cross entropy loss between the scores and the correct logits
     loss0 = F.cross_entropy(score0, torch.empty(score0.shape[0], dtype=torch.long).fill_(0).to(device), reduction='mean')
     loss1 = F.cross_entropy(score1, torch.empty(score1.shape[0], dtype=torch.long).fill_(1).to(device), reduction='mean')
@@ -76,39 +83,6 @@ def info_critic(model, image_batch, audio_batch, temperature, device):
     # We then sum the losses and return them
     loss = (loss0 + loss1 + loss2 + loss3) / 4
     return loss
-
-# def info_critic_plus(model, image_batch, audio_batch, temperature, device):
-#     image1, audio1, image2, audio2 = aug(image_batch, audio_batch)
-#     reps1 = model(image1 , audio1)
-#     reps2 = model(image2, audio2)
-#     n = reps1.shape[0] 
-#     # Create u, the anchors
-#     u = torch.cat([reps1, reps2], dim=0)
-#     # Create v0, the positive samples p(y|x_1,x_2)
-#     v0 = torch.cat([reps2, reps1], dim=0)
-#     # Create v2, the disturbed negative samples p(y|x1)
-#     images = torch.cat([image1, image2], dim=0)
-#     audios = torch.cat([audio1, audio2], dim=0)
-#     v2 = torch.cat([model(images[i].repeat_interleave(2*n-2, dim=0).unsqueeze(1), torch.cat([audios[:(i%n)], audios[(i%n)+1:(i%n)+n], audios[(i%n)+n+1:]], dim=0)) for i in range(2*n)], dim=0)
-#     # Create v3, the disturbed negative samples p(y|x2)
-#     v3 = torch.cat([model(torch.cat([images[:(i%n)], images[(i%n)+1:(i%n)+n], images[(i%n)+n+1:]], dim=0), audios[i].repeat_interleave(2*n-2, dim=0).unsqueeze(1)) for i in range(2*n)], dim=0)
-
-#     # We then compute scores between u and v0, u and v1, u and v2, u and v3
-#     score0 = model.score(u, v0)
-#     score1 = torch.cat([model.score(u[i].unsqueeze(0).repeat_interleave(2*n-2, dim=0), torch.cat([u[:(i%n)], u[(i%n)+1:(i%n)+n], u[(i%n)+n+1:]], dim=0)) for i in range(2*n)], dim=0)
-#     score2 = model.score(torch.cat([u[i].unsqueeze(0).repeat_interleave(2*n-2, dim=0) for i in range(2*n)], dim=0), v2)
-#     score3 = model.score(torch.cat([u[i].unsqueeze(0).repeat_interleave(2*n-2, dim=0) for i in range(2*n)], dim=0), v3)
-
-#     # We then compute the cross entropy loss between the scores and the correct logits
-#     loss0 = F.cross_entropy(score0, torch.empty(score0.shape[0], dtype=torch.long).fill_(0).to(device), reduction='mean')
-#     loss1 = F.cross_entropy(score1, torch.empty(score1.shape[0], dtype=torch.long).fill_(1).to(device), reduction='mean')
-#     loss2 = F.cross_entropy(score2, torch.empty(score2.shape[0], dtype=torch.long).fill_(2).to(device), reduction='mean')
-#     loss3 = F.cross_entropy(score3, torch.empty(score3.shape[0], dtype=torch.long).fill_(3).to(device), reduction='mean')
-#     # We then sum the losses and return them
-#     loss = (loss0 + loss1 + loss2 + loss3) / 4
-#     return loss
-#     # TODO: could increase number of 0d, 1d samples
-#     # TODO: Not completely sure if its correct atm, especially the 0d, 1d
 
 def info_critic_plus(model, image_batch, audio_batch, temperature, device):
     image1, audio1, image2, audio2 = aug(image_batch, audio_batch)
@@ -352,7 +326,7 @@ def decomposed_loss(model, image_batch, audio_batch, temperature, device):
     return (pos_loss + neg_loss + zero_loss + one_loss)/4
     # TODO: think need to work on fused 
    
-def SimCLR_loss(model, image_batch, audio_batch, temperature, device):
+def SimCLR_loss(model, image_batch, audio_batch, temperature, device, acc=False):
     # Augment each sample twice (for both modalities)
     image1, audio1, image2, audio2 = aug(image_batch, audio_batch)
     y1, y2 = model(image1, audio1), model(image2, audio2)
@@ -379,14 +353,22 @@ def SimCLR_loss(model, image_batch, audio_batch, temperature, device):
     # Concatenate the positives and negatives
     logits = torch.cat([positives, negatives], dim=1)
 
+    if acc:
+        # Compute accuracy
+        labels = torch.stack([l.argmax() for l in labels])
+        predictions = logits.argmax(dim=1)
+        accuracy = (predictions == labels).float().mean()
+        return accuracy
+    
     # Compute the loss
     return nn.CrossEntropyLoss()(logits, labels)
 
-# TODO:
-    # Should we average the losses?
-    # Do we need to weigh with pi_c's in the cross entropy loss?
-    # Softmax?
-    # Exponential? / Logarithm?
 
-    #Need to check everything being loaded onto GP
-    # Related to this should profile and check everything is speedy as can be
+def get_train_accuracy(model, image_batch, audio_batch, est, device):
+    if est == 'info_critic':
+        train_acc = info_critic(model, image_batch, audio_batch, 1, device, acc=True)
+    elif est == 'SimCLR':
+        train_acc = SimCLR_loss(model, image_batch, audio_batch, 1, device, acc=True)
+    else:
+        raise Exception('Unknown estimation method')
+    return train_acc

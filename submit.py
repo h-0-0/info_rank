@@ -8,12 +8,13 @@ if  __name__ == "__main__":
             # 'StrictFusionModel', 'StrictAudioOnly', 'StrictImageOnly',
             # 'ShallowStrictFusionModel', 'ShallowStrictAudioOnly', 'ShallowStrictImageOnly',
             ],
-        'num_epochs': [0, 1, 10, 100, 200],
+        'num_epochs': [1], #, 25, 50, 100],
         'batch_size': [128],
-        'est': ['SimCLR', 'info_critic'],  #'prob_loss', 'decomposed_loss', 'info_rank', 'info_rank_plus' #'SimCLR',  'info_critic', 'info_critic_plus'
+        'est': ['SimCLR'],  #'prob_loss', 'decomposed_loss', 'info_rank', 'info_rank_plus' #'SimCLR',  'info_critic', 'info_critic_plus'
         'patience': [-1],
-        'temperature': [1],
-        'learning_rate': [1, 1e-1, 1e-2, 1e-4, 1e-6, 1e-8, 1e-10, 1e-12, 1e-14, 1e-16, 1e-18, 1e-20],
+        # 'temperature': [1, 0.01, 0.0001],
+        # 'learning_rate': [5e-1, 2e-1, 1e-1, 5e-2, 1e-2, 5e-3, 1e-3], #info_critic
+        'learning_rate': [1e-1, 1e-2, 1e-4, 1e-6, 1e-8, 1e-10, 1e-14, 1e-18], #SimCLR
     }
     grid_info_rank = slune.searchers.SearcherGrid(to_search_info_rank)
 

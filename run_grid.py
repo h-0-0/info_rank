@@ -25,7 +25,7 @@ if  __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, help='Batch size to use', default=256)
     parser.add_argument('--est', type=str, help='Estimator to use', default="info_rank")
     parser.add_argument('--patience', type=int, help='Patience for early stopping', default=10)
-    parser.add_argument('--temperature', type=float, help='Temperature for NCE', default=0.1)
+    parser.add_argument('--temperature', type=float, help='Temperature for NCE', default=1.0)
     args = parser.parse_args()
 
     config = {

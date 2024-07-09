@@ -9,7 +9,7 @@ from utils import dict_to_ls
 import slune
 import os
 from model import FusionModel, LinearClassifier, StrictFusionModel, ShallowStrictFusionModel
-from loss import SimCLR_loss, info_critic, info_critic_plus, info_rank, info_rank_plus, prob_loss, decomposed_loss
+from loss import SimCLR_loss, info_critic, info_critic_plus, info_rank, info_rank_plus, prob_loss, decomposed_loss, get_train_accuracy
 
 def train(**kwargs):
     """
@@ -108,6 +108,7 @@ def train(**kwargs):
     # Train the model
     cum_b = -1
     epoch_losses = []
+    epoch_train_accuracies = []
     batch_stop = len(train_loader)
     if  1 > num_epochs > 0:
         batch_stop = num_epochs * len(train_loader)
@@ -130,6 +131,12 @@ def train(**kwargs):
             writer.add_scalar('Loss/train', loss.item(), cum_b)
             saver.log({'train_loss': loss.item()})
 
+            # Calculate and log training accuracy
+            train_acc = get_train_accuracy(model, image_batch, audio_batch, est, device)
+            epoch_train_accuracies.append(train_acc.item())
+            writer.add_scalar('Accuracy/train', train_acc.item(), cum_b)
+            saver.log({'train_acc': train_acc.item()})
+
             # Backward pass and optimization
             loss.backward()
             optimizer.step()
@@ -148,6 +155,12 @@ def train(**kwargs):
         writer.add_scalar('Loss/epoch_avg_train', avg_loss, e)
         saver.log({'train_loss_epoch_avg': avg_loss})
         epoch_losses = []
+
+        # Avg. epoch train accuracy
+        avg_train_acc = np.mean(epoch_train_accuracies)
+        writer.add_scalar('Accuracy/epoch_avg_train', avg_train_acc, e)
+        saver.log({'train_acc_epoch_avg': avg_train_acc})
+        epoch_train_accuracies = []
 
         # Early stopping
         if patience is None:
@@ -240,11 +253,11 @@ if __name__ == "__main__":
         'benchmark': 'written_spoken_digits',
         'model': 'FusionModel',
         'learning_rate': 1e-4,
-        'num_epochs': 0,
+        'num_epochs': 1,
         'batch_size': 256,
         'est': args.est,
         'patience': -1,
-        'temperature': 0.1,
+        'temperature': 1,
     }
     # Train the model
     losses, model = train(**config)
