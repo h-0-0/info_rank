@@ -238,6 +238,30 @@ def train(**kwargs):
     saver.log({'eval_test_accuracy': accuracy})
     print(f'Accuracy of the network on the {total_samples} test images: {accuracy:.4f}', flush=True)
 
+    total_loss = 0.0
+    total_correct = 0
+    total_samples = 0
+    with torch.no_grad():
+        for image_train, audio_train, label_train in train_loader:
+            image_train, audio_train, label_train = image_train.to(device), audio_train.to(device), label_train.to(device)
+            rep = model(image_train, audio_train)
+            logits = linear_classifier(rep)
+            loss = nn.CrossEntropyLoss()(logits, label_train)
+            writer.add_scalar('Eval/train_loss', loss.item(), cum_b)
+            saver.log({'eval_train_loss': loss.item()})
+            # Compute the accuracy
+            _, predicted = torch.max(logits.data, 1)
+            total_correct += (predicted == label_train).sum().item()
+            total_samples += image_train.size(0)
+    
+    avg_loss = total_loss / total_samples
+    accuracy = total_correct / total_samples
+    writer.add_scalar('Eval/train_loss', avg_loss, cum_b)
+    saver.log({'eval_train_loss': avg_loss})
+    writer.add_scalar('Eval/train_accuracy', accuracy, cum_b)
+    saver.log({'eval_train_accuracy': accuracy})
+    print(f'Accuracy of the network on the {total_samples} train images: {accuracy:.4f}', flush=True)
+
     saver.save_collated()
     return losses, model
 
@@ -254,7 +278,7 @@ if __name__ == "__main__":
         'model': 'FusionModel',
         'learning_rate': 1e-4,
         'num_epochs': 1,
-        'batch_size': 256,
+        'batch_size': 128,
         'est': args.est,
         'patience': -1,
         'temperature': 1,

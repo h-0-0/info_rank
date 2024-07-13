@@ -326,43 +326,43 @@ def decomposed_loss(model, image_batch, audio_batch, temperature, device):
     return (pos_loss + neg_loss + zero_loss + one_loss)/4
     # TODO: think need to work on fused 
    
+
 def SimCLR_loss(model, image_batch, audio_batch, temperature, device, acc=False):
+    batch_size = image_batch.shape[0]
+    LARGE_NUM = 1e9
     # Augment each sample twice (for both modalities)
     image1, audio1, image2, audio2 = aug(image_batch, audio_batch)
+    image1, audio1 = image1.to(device), audio1.to(device)
+    image2, audio2 = image2.to(device), audio2.to(device)
     y1, y2 = model(image1, audio1), model(image2, audio2)
 
-    # Combine y1 and y2
-    y = torch.cat([y1, y2], dim=0)
-    
-    # Compute the scores
-    scores = cosine_sim(y, temperature)
+    labels = F.one_hot(torch.arange(batch_size), num_classes=batch_size * 2).float().to(device)
+    masks = F.one_hot(torch.arange(batch_size), num_classes=batch_size).float().to(device)
 
-    # Compute labels 
-    labels = torch.cat([torch.arange(image1.shape[0]) for i in range(2)], dim=0).to(device)
-    labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+    logits_aa = torch.matmul(y1, y1.t()) / temperature
+    logits_aa = logits_aa - masks * LARGE_NUM
+    logits_bb = torch.matmul(y2, y2.t()) / temperature
+    logits_bb = logits_bb - masks * LARGE_NUM
+    logits_ab = torch.matmul(y1, y2.t()) / temperature
+    logits_ba = torch.matmul(y2, y1.t()) / temperature
 
-    # Mask the diagonal elements
-    mask = torch.eye(labels.shape[0], dtype=torch.bool)
-    labels = labels[~mask].view(labels.shape[0], -1)
-    scores = scores[~mask].view(scores.shape[0], -1)
+    loss_a = F.cross_entropy(
+        torch.cat([logits_ab, logits_aa], dim=1),
+        torch.arange(batch_size).to(device)
+    )
+    loss_b = F.cross_entropy(
+        torch.cat([logits_ba, logits_bb], dim=1),
+        torch.arange(batch_size).to(device)
+    )
+    loss = loss_a + loss_b
 
-    # Select the positive and negative samples based on the labels
-    positives = scores[labels.bool()].view(labels.shape[0], -1)
-    negatives = scores[~labels.bool()].view(scores.shape[0], -1)
-
-    # Concatenate the positives and negatives
-    logits = torch.cat([positives, negatives], dim=1)
-
-    if acc:
-        # Compute accuracy
-        labels = torch.stack([l.argmax() for l in labels])
-        predictions = logits.argmax(dim=1)
+    if acc==True:
+        labels = labels.argmax(dim=1)
+        predictions = logits_ab.argmax(dim=1)
         accuracy = (predictions == labels).float().mean()
         return accuracy
     
-    # Compute the loss
-    return nn.CrossEntropyLoss()(logits, labels)
-
+    return loss
 
 def get_train_accuracy(model, image_batch, audio_batch, est, device):
     if est == 'info_critic':
