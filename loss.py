@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import torch
 from torchvision import transforms as iT
 from torchaudio import transforms as aT
+from utils import generate_binary_combinations
 
 def cosine_sim(y, temperature=0.1):
     """ Scoring function (cosine similarity)."""
@@ -39,49 +40,52 @@ def audio_aug(x):
     )
     return augmentations(x)
 
-def aug(images, audio):
+def aug(batch, device=None):
+    images, audio = batch
     # Create two augmented versions of each image 
     image1 = image_aug(images)
     image2 = image_aug(images)
     # Create two augmented versions of each audio
     audio1 = audio_aug(audio)
     audio2 = audio_aug(audio)
-    return image1, audio1, image2, audio2
+    if device is not None:
+        image1 = image1.to(device)
+        image2 = image2.to(device)
+        audio1 = audio1.to(device)
+        audio2 = audio2.to(device)
+    return (image1, audio1), (image2, audio2)
+# TODO: pass augmentaion selection, rename above image_audio_aug
 
-def info_critic(model, image_batch, audio_batch, temperature, device, acc=False):
-    image1, audio1, image2, audio2 = aug(image_batch, audio_batch)
+def info_critic(model, batch1, batch2, temperature, device, acc=False):
+    num_modalities = len(batch1) if not torch.is_tensor(batch1) else 1
+    to_disturb = generate_binary_combinations(num_modalities)
     # Create u, the anchors
-    u = model(image1 , audio1)
-    # Create v0, the positive samples p(y|x_1,x_2)
-    v0 = model(image2, audio2)
-    # Create v1, the negative samples p(y)
-    v1 = v0.roll(1, 0)
-    # Create v2, the disturbed negative samples p(y|x1)
-    v2 = model(image2, audio2.roll(1, 0))
-    # Create v3, the disturbed negative samples p(y|x2)
-    v3 = model(image2.roll(1, 0), audio2)
+    u = model(batch1)
+    vs = []
+    if num_modalities == 1:
+        vs.append(model(batch2))
+        v = batch2.roll(1, 0)
+        v = model(v)
+        vs.append(v)
+    else:
+        for disturb in to_disturb:
+            v = [batch2[i].roll(1, 0) if disturb[i] else batch2[i] for i in range(num_modalities)]
+            v = model(v)
+            vs.append(v)
 
-    # We then compute scores between u and v0, u and v1, u and v2, u and v3
-    score0 = model.score(u, v0)
-    score1 = model.score(u, v1)
-    score2 = model.score(u, v2)
-    score3 = model.score(u, v3)
-    # TODO: rename energy instead of score?
+    scores = [model.score(u, v) for v in vs]
 
     if acc:
         # Compute accuracy
-        predictions = torch.cat([score0, score1, score2, score3], dim=0).argmax(dim=1)
-        labels = torch.cat([torch.zeros(score0.shape[0]), torch.ones(score1.shape[0]), 2*torch.ones(score2.shape[0]), 3*torch.ones(score3.shape[0])], dim=0).to(device)
+        predictions = torch.cat(scores, dim=0).argmax(dim=1)
+        labels = torch.cat([i*torch.ones(s.shape[0]) for i, s in enumerate(scores)], dim=0).to(device)
         accuracy = (predictions == labels).float().mean()
         return accuracy
 
     # We then compute the cross entropy loss between the scores and the correct logits
-    loss0 = F.cross_entropy(score0, torch.empty(score0.shape[0], dtype=torch.long).fill_(0).to(device), reduction='mean')
-    loss1 = F.cross_entropy(score1, torch.empty(score1.shape[0], dtype=torch.long).fill_(1).to(device), reduction='mean')
-    loss2 = F.cross_entropy(score2, torch.empty(score2.shape[0], dtype=torch.long).fill_(2).to(device), reduction='mean')
-    loss3 = F.cross_entropy(score3, torch.empty(score3.shape[0], dtype=torch.long).fill_(3).to(device), reduction='mean')
+    losses = [F.cross_entropy(s, torch.empty(s.shape[0], dtype=torch.long).fill_(i).to(device), reduction='mean') for i, s in enumerate(scores)]
     # We then sum the losses and return them
-    loss = (loss0 + loss1 + loss2 + loss3) / 4
+    loss = sum(losses) / len(losses)
     return loss
 
 def info_critic_plus(model, image_batch, audio_batch, temperature, device):
@@ -327,14 +331,10 @@ def decomposed_loss(model, image_batch, audio_batch, temperature, device):
     # TODO: think need to work on fused 
    
 
-def SimCLR_loss(model, image_batch, audio_batch, temperature, device, acc=False):
-    batch_size = image_batch.shape[0]
+def SimCLR_loss(model, batch1, batch2, temperature, device, acc=False):
+    batch_size = batch1[0].shape[0] if isinstance(batch1, (tuple, list)) else batch1.shape[0]
     LARGE_NUM = 1e9
-    # Augment each sample twice (for both modalities)
-    image1, audio1, image2, audio2 = aug(image_batch, audio_batch)
-    image1, audio1 = image1.to(device), audio1.to(device)
-    image2, audio2 = image2.to(device), audio2.to(device)
-    y1, y2 = model(image1, audio1), model(image2, audio2)
+    y1, y2 = model(batch1), model(batch2)
 
     labels = F.one_hot(torch.arange(batch_size), num_classes=batch_size * 2).float().to(device)
     masks = F.one_hot(torch.arange(batch_size), num_classes=batch_size).float().to(device)
@@ -364,11 +364,11 @@ def SimCLR_loss(model, image_batch, audio_batch, temperature, device, acc=False)
     
     return loss
 
-def get_train_accuracy(model, image_batch, audio_batch, est, device):
+def get_train_accuracy(model, batch1, batch2, est, device):
     if est == 'info_critic':
-        train_acc = info_critic(model, image_batch, audio_batch, 1, device, acc=True)
+        train_acc = info_critic(model, batch1, batch2, 1, device, acc=True)
     elif est == 'SimCLR':
-        train_acc = SimCLR_loss(model, image_batch, audio_batch, 1, device, acc=True)
+        train_acc = SimCLR_loss(model, batch1, batch2, 1, device, acc=True)
     else:
         raise Exception('Unknown estimation method')
     return train_acc

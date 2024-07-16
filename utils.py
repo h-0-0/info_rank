@@ -25,3 +25,11 @@ def ls_to_dict(ls):
                 pass
         d[key] = value
     return d
+
+def generate_binary_combinations(n):
+    if n <= 0:
+        return []
+    
+    # Using list comprehension and itertools.product
+    import itertools
+    return list(itertools.product([0, 1], repeat=n))

@@ -30,10 +30,10 @@ if  __name__ == "__main__":
 
     config = {
         'benchmark': [args.benchmark],
+        'est': [args.est],
         'model': [args.model],
         'num_epochs': [args.num_epochs],
         'batch_size': [args.batch_size],
-        'est': [args.est],
         'patience': [args.patience],
         'temperature': [args.temperature],
         'learning_rate': [args.learning_rate],
@@ -44,17 +44,11 @@ if  __name__ == "__main__":
     for g in grid:
         # Add the net to the config
         # Train the model
-        losses, model = train(**g)
+        model, linear_classifier = train(**g)
         # Create save location using slune
         saver = slune.get_csv_saver(root_dir='results', params=g)
         print("path: ", g, flush=True)
         path = os.path.dirname(saver.getset_current_path())
-
-        # Plot the loss
-        plt.figure()
-        plt.plot(np.arange(len(losses)), np.array(losses))
-        plt.savefig(os.path.join(path, "loss.png"))
-        plt.close()
         
         # Clear GPU memory
         torch.cuda.empty_cache()
