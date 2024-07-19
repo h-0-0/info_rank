@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import torch
 from torchvision import transforms as iT
 from torchaudio import transforms as aT
-from utils import generate_binary_combinations
+from utils import generate_binary_combinations, swap_halves, dual_batch_indice_permutation
 
 def cosine_sim(y, temperature=0.1):
     """ Scoring function (cosine similarity)."""
@@ -80,7 +80,16 @@ def info_critic(model, batch1, batch2, temperature, device, acc=False):
         predictions = torch.cat(scores, dim=0).argmax(dim=1)
         labels = torch.cat([i*torch.ones(s.shape[0]) for i, s in enumerate(scores)], dim=0).to(device)
         accuracy = (predictions == labels).float().mean()
-        return accuracy
+
+        #REMOVE
+        acc_0 = (scores[0].argmax(dim=1) == torch.zeros(scores[0].shape[0])).float().mean()
+        acc_1 = ( (scores[1].argmax(dim=1) == torch.ones(scores[1].shape[0])) | (scores[1].argmax(dim=1) == 2*torch.ones(scores[1].shape[0])) ).float().mean()
+        acc_2 = ( (scores[2].argmax(dim=1) == torch.ones(scores[2].shape[0])) | (scores[2].argmax(dim=1) == 2*torch.ones(scores[2].shape[0])) ).float().mean()
+        acc_3 = (scores[3].argmax(dim=1) == 3*torch.ones(scores[3].shape[0])).float().mean()
+
+        #REMOVE
+        symmmetric_acc = (acc_0 + acc_1 + acc_2 + acc_3) / 4
+        return accuracy, symmmetric_acc
 
     # We then compute the cross entropy loss between the scores and the correct logits
     losses = [F.cross_entropy(s, torch.empty(s.shape[0], dtype=torch.long).fill_(i).to(device), reduction='mean') for i, s in enumerate(scores)]
@@ -88,59 +97,55 @@ def info_critic(model, batch1, batch2, temperature, device, acc=False):
     loss = sum(losses) / len(losses)
     return loss
 
-def info_critic_plus(model, image_batch, audio_batch, temperature, device):
-    image1, audio1, image2, audio2 = aug(image_batch, audio_batch)
-    image1, audio1 = model.encode_modalities(image1, audio1)
-    image2, audio2 = model.encode_modalities(image2, audio2)
-    reps1 = model.fuse(image1 , audio1)
-    reps2 = model.fuse(image2, audio2)
-    n = reps1.shape[0] 
-    loss = 0
+def info_critic_plus(model, batch1, batch2, temperature, device, acc=False):
+    num_modalities = len(batch1) if not torch.is_tensor(batch1) else 1
+    to_disturb = generate_binary_combinations(num_modalities)
+    # Create u, the anchors
+    u = torch.cat([model(batch1), model(batch2)], dim=0)
+    loss = []
+    scores = []
+    if num_modalities == 1:
+        v_pos = swap_halves(u)
+        score = model.score(u, v_pos)
+        if acc: 
+            scores.append(score)
+        else:
+            loss.append(F.cross_entropy(score, torch.empty(score.shape[0], dtype=torch.long).fill_(0).to(device), reduction='mean'))
 
-    # First compute loss for positive samples
-    u = torch.cat([reps1, reps2], dim=0) 
-    v0 = torch.cat([reps2, reps1], dim=0)
-    score0 = model.score(u, v0)
-    loss0 = F.cross_entropy(score0, torch.empty(score0.shape[0], dtype=torch.long).fill_(0).to(device), reduction='mean')
-    loss += loss0
-    del v0
-    del score0
-    del loss0
-    torch.cuda.empty_cache()
 
-    # Now hard negatives
-    score1 = torch.cat([model.score(u[i].unsqueeze(0).repeat_interleave(2*n-2, dim=0), torch.cat([u[:(i%n)], u[(i%n)+1:(i%n)+n], u[(i%n)+n+1:]], dim=0)) for i in range(2*n)], dim=0)
-    loss1 = F.cross_entropy(score1, torch.empty(score1.shape[0], dtype=torch.long).fill_(1).to(device), reduction='mean')
-    loss += loss1
-    del score1
-    del loss1
-    torch.cuda.empty_cache()
+        neg_perm = dual_batch_indice_permutation(batch1.shape[0])
+        score = model.score(u, u[neg_perm])
+        if acc: 
+            scores.append(score)
+        else:
+            loss.append(F.cross_entropy(score, torch.empty(score.shape[0], dtype=torch.long).fill_(1).to(device), reduction='mean'))
 
-    # Now the disturbed samples
-    images = torch.cat([image1, image2], dim=0)
-    audios = torch.cat([audio1, audio2], dim=0)
-    # First 0-disturbed
-    v2 = torch.cat([model.fuse(images[i].unsqueeze(0).repeat_interleave(2*n-2, dim=0), torch.cat([audios[:(i%n)], audios[(i%n)+1:(i%n)+n], audios[(i%n)+n+1:]], dim=0)) for i in range(2*n)], dim=0)
-    score2 = model.score(torch.cat([u[i].unsqueeze(0).repeat_interleave(2*n-2, dim=0) for i in range(2*n)], dim=0), v2)
-    loss2 = F.cross_entropy(score2, torch.empty(score2.shape[0], dtype=torch.long).fill_(2).to(device), reduction='mean')
-    loss += loss2
-    del v2
-    del score2
-    del loss2
-    torch.cuda.empty_cache()
-    # Now 1-disturbed
-    v3 = torch.cat([model.fuse(torch.cat([images[:(i%n)], images[(i%n)+1:(i%n)+n], images[(i%n)+n+1:]], dim=0), audios[i].unsqueeze(0).repeat_interleave(2*n-2, dim=0)) for i in range(2*n)], dim=0)
-    score3 = model.score(torch.cat([u[i].unsqueeze(0).repeat_interleave(2*n-2, dim=0) for i in range(2*n)], dim=0), v3)
-    loss3 = F.cross_entropy(score3, torch.empty(score3.shape[0], dtype=torch.long).fill_(3).to(device), reduction='mean')
-    loss += loss3
-    del v3 
-    del score3
-    del loss3
-    torch.cuda.empty_cache()
-    # We then average summed losses and return resulting loss
-    return loss / 4
-    # TODO: could increase number of 0d, 1d samples
-    # TODO: Not completely sure if its correct atm, especially the 0d, 1d
+    else:
+        label = -1
+        for disturb in to_disturb:
+            label += 1
+            perm = dual_batch_indice_permutation(batch1[0].shape[0])
+            v = []
+            for i in range(num_modalities):
+                if disturb[i]:
+                    v.append(torch.cat([batch1[i], batch2[i]])[perm])
+                else:
+                    v.append(torch.cat([batch1[i], batch2[i]]))
+            v = model(v)
+            score = model.score(u, v)
+            if acc: 
+                scores.append(score)
+            else:
+                loss.append(F.cross_entropy(score, torch.empty(score.shape[0], dtype=torch.long).fill_(label).to(device), reduction='mean'))
+
+    if acc:
+        # Compute accuracy
+        predictions = torch.cat(scores, dim=0).argmax(dim=1)
+        labels = torch.cat([i*torch.ones(s.shape[0]) for i, s in enumerate(scores)], dim=0).to(device)
+        accuracy = (predictions == labels).float().mean()
+        return accuracy
+
+    return sum(loss) / len(loss)
 
 def info_rank(model, image_batch, audio_batch, temperature, device):
     image1, audio1, image2, audio2 = aug(image_batch, audio_batch)
@@ -366,9 +371,12 @@ def SimCLR_loss(model, batch1, batch2, temperature, device, acc=False):
 
 def get_train_accuracy(model, batch1, batch2, est, device):
     if est == 'info_critic':
-        train_acc = info_critic(model, batch1, batch2, 1, device, acc=True)
+        train_acc, symmetric_acc = info_critic(model, batch1, batch2, 1, device, acc=True)
+        acc = (train_acc, symmetric_acc) #REMOVE
+    elif est == 'info_critic_plus':
+        acc = info_critic_plus(model, batch1, batch2, 1, device, acc=True)
     elif est == 'SimCLR':
-        train_acc = SimCLR_loss(model, batch1, batch2, 1, device, acc=True)
+        acc = SimCLR_loss(model, batch1, batch2, 1, device, acc=True)
     else:
         raise Exception('Unknown estimation method')
-    return train_acc
+    return acc

@@ -114,6 +114,7 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
     cum_b = -1
     epoch_losses = []
     epoch_train_accuracies = []
+    epoch_symmetric = [] #REMOVE
     batch_stop = len(train_loader)
     if  1 > num_epochs > 0:
         batch_stop = num_epochs * len(train_loader)
@@ -145,8 +146,9 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
             saver.log({'train_loss': loss.item()})
 
             # Calculate and log training accuracy
-            train_acc = get_train_accuracy(model, batch1, batch2, est, device)
+            train_acc, symmetric_acc = get_train_accuracy(model, batch1, batch2, est, device) #REMOVE
             epoch_train_accuracies.append(train_acc.item())
+            epoch_symmetric.append(symmetric_acc.item()) #REMOVE
             writer.add_scalar('Accuracy/train', train_acc.item(), cum_b)
             saver.log({'train_acc': train_acc.item()})
 
@@ -174,6 +176,12 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
         writer.add_scalar('Accuracy/epoch_avg_train', avg_train_acc, e)
         saver.log({'train_acc_epoch_avg': avg_train_acc})
         epoch_train_accuracies = []
+
+        # Avg. epoch symmetric accuracy
+        avg_symmetric_acc = np.mean(epoch_symmetric) #REMOVE
+        writer.add_scalar('Accuracy/epoch_avg_symmetric', avg_symmetric_acc, e) #REMOVE
+        saver.log({'symmetric_acc_epoch_avg': avg_symmetric_acc}) #REMOVE
+        epoch_symmetric = []
 
         # Early stopping
         if patience is None:
@@ -284,6 +292,7 @@ def train(**kwargs):
         est: Literal['info_rank'] (estimator to use)
         patience: int (number of epochs to wait before early stopping)
         temperature: float (temperature for the estimator)
+        output_dim: int (output dimension of the model)
 
     Returns:
         losses: list
@@ -302,6 +311,7 @@ def train(**kwargs):
     if patience < 0:
         patience = None
     temperature = kwargs['temperature']
+    output_dim = kwargs['output_dim']
 
     # Create save location using slune and tensorboard writer
     saver = slune.get_csv_saver(kwargs, root_dir='results')
@@ -320,13 +330,13 @@ def train(**kwargs):
         raise ValueError("Invalid benchmark: {}".format(benchmark))
     
     if model == "FusionModel":
-        model = FusionModel()
+        model = FusionModel(output_dim=output_dim)
         modality = 'image+audio'
     elif model == "ImageOnly":
-        model = ImageModel()
+        model = ImageModel(output_dim=output_dim)
         modality = 'image'
     elif model == "AudioOnly":
-        model = AudioModel()
+        model = AudioModel(output_dim=output_dim)
         modality = 'audio'
     else:
         raise ValueError("Invalid model")
@@ -390,6 +400,7 @@ if __name__ == "__main__":
         'est': args.est,
         'patience': -1,
         'temperature': 1,
+        'output_dim': 64,
     }
     # Train the model
     model = train(**config)

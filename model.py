@@ -4,17 +4,15 @@ import torch
 from torchvision import transforms
 
 class MNIST_Image_CNN(nn.Module):
-    def __init__(self):
+    def __init__(self, output_dim=64):
         super(MNIST_Image_CNN, self).__init__()
-        self.output_dim = 64
+        self.output_dim = output_dim
 
         self.conv1 = nn.Conv2d(1, 32, kernel_size=5)
         self.bnorm1 = nn.BatchNorm2d(32)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=5)
         self.bnorm2 = nn.BatchNorm2d(64)
         self.fc1 = nn.Linear(1024, self.output_dim) 
-
-        self.W = nn.Parameter(torch.randn(self.output_dim, self.output_dim))
 
     def forward(self, x):
         n_b = x.shape[0]
@@ -25,9 +23,6 @@ class MNIST_Image_CNN(nn.Module):
         x = x.view(n_b, -1)
         x = self.fc1(x)
         return x
-    
-    def score(self, u, v, temperature):
-        return torch.matmul(u, torch.matmul(self.W, v.t())) / temperature
 
 class MLP(nn.Module):
     """ A multi layer perceptron for representation learning. """
@@ -52,15 +47,13 @@ class MLP(nn.Module):
         return self.layers[-1](x)
 
 class MNIST_Audio_CNN(nn.Module):
-    def __init__(self):
+    def __init__(self, output_dim=64):
         super(MNIST_Audio_CNN, self).__init__()
-        self.output_dim = 64
+        self.output_dim = output_dim
 
         self.conv1 = nn.Conv2d(1, 32, kernel_size=(3,3), stride=1)  
         self.conv2 = nn.Conv2d(32, 32, kernel_size=(3,3), stride=2)  
         self.fc1 = nn.Linear(11520, self.output_dim) 
-
-        self.W = nn.Parameter(torch.randn(self.output_dim, self.output_dim))
 
     def forward(self, x):
         n_b = x.shape[0]
@@ -70,25 +63,22 @@ class MNIST_Audio_CNN(nn.Module):
         x = self.fc1(x)
         return x
 
-    def score(self, u, v, temperature):
-        return torch.matmul(u, torch.matmul(self.W, v.t())) / temperature
-
     
 class FusionModel(nn.Module):
-    def __init__(self):
+    def __init__(self, output_dim=64):
         super(FusionModel, self).__init__()
 
-        self.output_dim = 64
+        self.output_dim = output_dim
         
-        self.image_encoder = MNIST_Image_CNN()
-        self.audio_encoder = MNIST_Audio_CNN() 
+        self.image_encoder = MNIST_Image_CNN(output_dim=output_dim)
+        self.audio_encoder = MNIST_Audio_CNN(output_dim=output_dim) 
         
         # Assuming the output dimensions of the image and audio encoders are 50 and 32 respectively
         self.fusion_mlp = nn.Sequential(
             nn.ReLU(),
-            nn.Linear(128, 64),
+            nn.Linear(output_dim*2, output_dim),
             nn.ReLU(),
-            nn.Linear(64, self.output_dim),
+            nn.Linear(output_dim, self.output_dim),
         )
 
         self.critic = nn.Sequential(
@@ -118,12 +108,12 @@ class FusionModel(nn.Module):
         return self.critic(concat)
     
 class ImageModel(nn.Module):
-    def __init__(self):
+    def __init__(self, output_dim=64):
         super(ImageModel, self).__init__()
 
-        self.output_dim = 64
+        self.output_dim = output_dim
         
-        self.image_encoder = MNIST_Image_CNN()
+        self.image_encoder = MNIST_Image_CNN(output_dim=output_dim)
         
         self.critic = nn.Sequential(
             nn.Linear(self.output_dim*2, 2),
@@ -138,12 +128,12 @@ class ImageModel(nn.Module):
         return self.critic(concat)
 
 class AudioModel(nn.Module):
-    def __init__(self):
+    def __init__(self, output_dim=64):
         super(AudioModel, self).__init__()
 
-        self.output_dim = 64
+        self.output_dim = output_dim
         
-        self.audio_encoder = MNIST_Audio_CNN()
+        self.audio_encoder = MNIST_Audio_CNN(output_dim=output_dim)
         
         self.critic = nn.Sequential(
             nn.Linear(self.output_dim*2, 2),

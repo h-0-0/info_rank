@@ -26,12 +26,14 @@ if  __name__ == "__main__":
     parser.add_argument('--est', type=str, help='Estimator to use', default="info_rank")
     parser.add_argument('--patience', type=int, help='Patience for early stopping', default=10)
     parser.add_argument('--temperature', type=float, help='Temperature for NCE', default=1.0)
+    parser.add_argument('--output_dim', type=int, help='Output dimension of the model', default=64)
     args = parser.parse_args()
 
     config = {
         'benchmark': [args.benchmark],
         'est': [args.est],
         'model': [args.model],
+        'output_dim': [args.output_dim],
         'num_epochs': [args.num_epochs],
         'batch_size': [args.batch_size],
         'patience': [args.patience],
