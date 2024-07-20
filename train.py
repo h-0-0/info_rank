@@ -115,6 +115,7 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
     epoch_losses = []
     epoch_train_accuracies = []
     epoch_symmetric = [] #REMOVE
+    epoch_class_accs = [] #REMOVE
     batch_stop = len(train_loader)
     if  1 > num_epochs > 0:
         batch_stop = num_epochs * len(train_loader)
@@ -146,9 +147,10 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
             saver.log({'train_loss': loss.item()})
 
             # Calculate and log training accuracy
-            train_acc, symmetric_acc = get_train_accuracy(model, batch1, batch2, est, device) #REMOVE
+            train_acc, symmetric_acc, other_accs = get_train_accuracy(model, batch1, batch2, est, device) #REMOVE
             epoch_train_accuracies.append(train_acc.item())
-            epoch_symmetric.append(symmetric_acc.item()) #REMOVE
+            epoch_symmetric.append(symmetric_acc) #REMOVE
+            epoch_class_accs.append(other_accs) #REMOVE
             writer.add_scalar('Accuracy/train', train_acc.item(), cum_b)
             saver.log({'train_acc': train_acc.item()})
 
@@ -182,6 +184,12 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
         writer.add_scalar('Accuracy/epoch_avg_symmetric', avg_symmetric_acc, e) #REMOVE
         saver.log({'symmetric_acc_epoch_avg': avg_symmetric_acc}) #REMOVE
         epoch_symmetric = []
+
+        # Avg. epoch other accs
+        avg_class_accs = [np.mean(acc) for acc in zip(*epoch_class_accs)]
+        for i, acc in enumerate(avg_class_accs):
+            writer.add_scalar(f'Accuracy/epoch_avg_class_{i}', acc, e)
+            saver.log({f'class_{i}_acc_epoch_avg': acc})
 
         # Early stopping
         if patience is None:
@@ -394,11 +402,11 @@ if __name__ == "__main__":
     config = {
         'benchmark': 'written_spoken_digits',
         'model': args.model,
-        'learning_rate': 1e-6,
-        'num_epochs': 1,
+        'learning_rate': 5e-2,
+        'num_epochs': 200,
         'batch_size': 128,
         'est': args.est,
-        'patience': -1,
+        'patience': 10,
         'temperature': 1,
         'output_dim': 64,
     }

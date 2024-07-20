@@ -80,16 +80,20 @@ def info_critic(model, batch1, batch2, temperature, device, acc=False):
         predictions = torch.cat(scores, dim=0).argmax(dim=1)
         labels = torch.cat([i*torch.ones(s.shape[0]) for i, s in enumerate(scores)], dim=0).to(device)
         accuracy = (predictions == labels).float().mean()
-
         #REMOVE
-        acc_0 = (scores[0].argmax(dim=1) == torch.zeros(scores[0].shape[0])).float().mean()
-        acc_1 = ( (scores[1].argmax(dim=1) == torch.ones(scores[1].shape[0])) | (scores[1].argmax(dim=1) == 2*torch.ones(scores[1].shape[0])) ).float().mean()
-        acc_2 = ( (scores[2].argmax(dim=1) == torch.ones(scores[2].shape[0])) | (scores[2].argmax(dim=1) == 2*torch.ones(scores[2].shape[0])) ).float().mean()
-        acc_3 = (scores[3].argmax(dim=1) == 3*torch.ones(scores[3].shape[0])).float().mean()
-
-        #REMOVE
-        symmmetric_acc = (acc_0 + acc_1 + acc_2 + acc_3) / 4
-        return accuracy, symmmetric_acc
+        if len(scores) == 4:
+            acc_0 = (scores[0].argmax(dim=1) == torch.zeros(scores[0].shape[0])).float().mean()
+            acc_1 = ( (scores[1].argmax(dim=1) == torch.ones(scores[1].shape[0])) | (scores[1].argmax(dim=1) == 2*torch.ones(scores[1].shape[0])) ).float().mean()
+            acc_2 = ( (scores[2].argmax(dim=1) == torch.ones(scores[2].shape[0])) | (scores[2].argmax(dim=1) == 2*torch.ones(scores[2].shape[0])) ).float().mean()
+            acc_3 = (scores[3].argmax(dim=1) == 3*torch.ones(scores[3].shape[0])).float().mean()
+            class_accs = (acc_0, acc_1, acc_2, acc_3)
+            symmmetric_acc = (acc_0 + acc_1 + acc_2 + acc_3) / 4
+        else:
+            acc_0 = (scores[0].argmax(dim=1) == torch.zeros(scores[0].shape[0])).float().mean()
+            acc_1 = (scores[1].argmax(dim=1) == torch.ones(scores[1].shape[0])).float().mean()
+            class_accs = (acc_0, acc_1)
+            symmmetric_acc = 0.0
+        return accuracy, symmmetric_acc, class_accs
 
     # We then compute the cross entropy loss between the scores and the correct logits
     losses = [F.cross_entropy(s, torch.empty(s.shape[0], dtype=torch.long).fill_(i).to(device), reduction='mean') for i, s in enumerate(scores)]
@@ -371,8 +375,8 @@ def SimCLR_loss(model, batch1, batch2, temperature, device, acc=False):
 
 def get_train_accuracy(model, batch1, batch2, est, device):
     if est == 'info_critic':
-        train_acc, symmetric_acc = info_critic(model, batch1, batch2, 1, device, acc=True)
-        acc = (train_acc, symmetric_acc) #REMOVE
+        train_acc, symmetric_acc, class_acc = info_critic(model, batch1, batch2, 1, device, acc=True)
+        acc = (train_acc, symmetric_acc, class_acc) #REMOVE
     elif est == 'info_critic_plus':
         acc = info_critic_plus(model, batch1, batch2, 1, device, acc=True)
     elif est == 'SimCLR':

@@ -11,7 +11,7 @@ from train import train
 
 config = {
     'benchmark': 'written_spoken_digits',
-    'model': 'FusionModel',
+    'model': 'ImageOnly',
     'learning_rate': 0.05,
     'num_epochs': 1,
     'batch_size': 128,

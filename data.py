@@ -144,6 +144,7 @@ def get_AudioMNIST() -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset
         - test_dataset (torch.utils.data.Dataset): The test dataset
 
     """
+    np.random.seed(42)
     # Check if np files exist and load them if they do
     if os.path.exists('data/mnist_audio_data.npy') and os.path.exists('data/mnist_audio_labels.npy'):
         audio_data = np.load('data/mnist_audio_data.npy')
@@ -153,7 +154,6 @@ def get_AudioMNIST() -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset
         audio_data = np.load('data/mnist_audio_data.npy')
         audio_labels = np.load('data/mnist_audio_labels.npy')
     # Split the data into train and test sets
-    np.random.seed(42)
     indices = np.random.permutation(audio_data.shape[0])
     train_indices = indices[:30000-4000]
     test_indices = indices[30000-4000:]
