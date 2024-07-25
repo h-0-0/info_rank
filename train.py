@@ -402,7 +402,7 @@ if __name__ == "__main__":
     config = {
         'benchmark': 'written_spoken_digits',
         'model': args.model,
-        'learning_rate': 5e-2,
+        'learning_rate': 1e-2,
         'num_epochs': 200,
         'batch_size': 128,
         'est': args.est,

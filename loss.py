@@ -82,15 +82,15 @@ def info_critic(model, batch1, batch2, temperature, device, acc=False):
         accuracy = (predictions == labels).float().mean()
         #REMOVE
         if len(scores) == 4:
-            acc_0 = (scores[0].argmax(dim=1) == torch.zeros(scores[0].shape[0])).float().mean()
-            acc_1 = ( (scores[1].argmax(dim=1) == torch.ones(scores[1].shape[0])) | (scores[1].argmax(dim=1) == 2*torch.ones(scores[1].shape[0])) ).float().mean()
-            acc_2 = ( (scores[2].argmax(dim=1) == torch.ones(scores[2].shape[0])) | (scores[2].argmax(dim=1) == 2*torch.ones(scores[2].shape[0])) ).float().mean()
-            acc_3 = (scores[3].argmax(dim=1) == 3*torch.ones(scores[3].shape[0])).float().mean()
+            acc_0 = (scores[0].argmax(dim=1).to(device) == torch.zeros(scores[0].shape[0]).to(device)).float().mean()
+            acc_1 = ( (scores[1].argmax(dim=1).to(device) == torch.ones(scores[1].shape[0]).to(device)) | (scores[1].argmax(dim=1).to(device) == 2*torch.ones(scores[1].shape[0]).to(device)) ).float().mean()
+            acc_2 = ( (scores[2].argmax(dim=1).to(device) == torch.ones(scores[2].shape[0]).to(device)) | (scores[2].argmax(dim=1).to(device) == 2*torch.ones(scores[2].shape[0]).to(device)) ).float().mean()
+            acc_3 = (scores[3].argmax(dim=1).to(device) == 3*torch.ones(scores[3].shape[0]).to(device)).float().mean()
             class_accs = (acc_0, acc_1, acc_2, acc_3)
             symmmetric_acc = (acc_0 + acc_1 + acc_2 + acc_3) / 4
         else:
-            acc_0 = (scores[0].argmax(dim=1) == torch.zeros(scores[0].shape[0])).float().mean()
-            acc_1 = (scores[1].argmax(dim=1) == torch.ones(scores[1].shape[0])).float().mean()
+            acc_0 = (scores[0].argmax(dim=1).to(device) == torch.zeros(scores[0].shape[0]).to(device)).float().mean()
+            acc_1 = (scores[1].argmax(dim=1).to(device) == torch.ones(scores[1].shape[0]).to(device)).float().mean()
             class_accs = (acc_0, acc_1)
             symmmetric_acc = 0.0
         return accuracy, symmmetric_acc, class_accs
