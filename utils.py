@@ -65,3 +65,41 @@ def dual_batch_indice_permutation(n):
                 possible_indices = torch.cat([torch.arange(1, i%n), torch.arange((i%n)+1, (i%n)+n), torch.arange((i%n)+n+1, 2*n)])
                 indices[i] = possible_indices[torch.randint(0, possible_indices.shape[0], (1,))]
     return indices
+
+def create_distribution(n):
+    if n < 2:
+        raise ValueError("n must be at least 2")
+    
+    distribution = [0.1] + [0.9 / (n - 1)] * (n - 1)
+    return distribution
+
+def rnd_idx_without(start, end, idxs):
+    x = torch.tensor([i for i in range(start, end) if i not in idxs])
+    return x[torch.randint(0, len(x), (1,)).item()]
+
+import torch.nn as nn
+class MyDataParallel(nn.DataParallel):
+    def __getattr__(self, name):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            return getattr(self.module, name)
+
+class CheckpointModule(torch.nn.Module):
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+
+    def forward(self, *args, **kwargs):
+        return torch.utils.checkpoint.checkpoint(self.module, *args, **kwargs)
+
+def ckpt_monkey(module, pattern_re, ancestor_vn=''):
+    for vn, v in module._modules.items():
+        full_vn = f'{ancestor_vn}.{vn}' if ancestor_vn else vn
+        v = ckpt_monkey(v, pattern_re, full_vn)
+        if pattern_re.match(full_vn):
+            print('monkey-patching', full_vn)
+            setattr(module, vn, CheckpointModule(v))
+        else:
+            setattr(module, vn, v)
+    return module

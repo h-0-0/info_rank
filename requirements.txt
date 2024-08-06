@@ -1,7 +1,20 @@
 torch
 torchvision
 torchaudio
-numpy
+numpy<2
 librosa
 matplotlib
 tensorboardX
+slune-lib @ git+https://github.com/h-0-0/slune@main
+gdown
+tensorflow_datasets
+tensorflow
+torchfile
+datasets
+transformers
+sentencepiece
+sacremoses
+h5py
+pillow
+accelerate
+bitsandbytes

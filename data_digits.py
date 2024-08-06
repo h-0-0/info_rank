@@ -180,7 +180,7 @@ def get_AudioMNIST() -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset
     return train_data, train_labels, test_data, test_labels
 
 
-def get_data_loaders(batch_size):
+def digits_get_data_loaders(batch_size):
     """
     Returns the train and test data loaders for the bi-modal dataset consisting of spoken mnist (audio) and written mnist (images).
     The data is split into a train and test set, with each set containing 30000 and 4000 samples respectfully.
@@ -194,9 +194,9 @@ def get_data_loaders(batch_size):
 
     """
     # Check if datasets exist and load them if they do
-    if os.path.exists(os.path.join('data','train_data.pt')) and os.path.exists(os.path.join('data','test_data.pt')):
-        train_data = torch.load('data/train_data.pt')
-        test_data = torch.load('data/test_data.pt')
+    if os.path.exists(os.path.join('data','digits_train_data.pt')) and os.path.exists(os.path.join('data','digits_test_data.pt')):
+        train_data = torch.load('data/digits_train_data.pt')
+        test_data = torch.load('data/digits_test_data.pt')
     else:
         audio_train_data, audio_train_labels, audio_test_data, audio_test_labels = get_AudioMNIST()
         images_train_data, images_train_labels, images_test_data, images_test_labels = get_ImageMNIST()
@@ -207,8 +207,8 @@ def get_data_loaders(batch_size):
         # Combine test sets so that we match images and audio samples according to label
         test_data = torch.utils.data.TensorDataset(images_test_data, audio_test_data, images_test_labels)
         # Save the datasets
-        torch.save(train_data, 'data/train_data.pt')
-        torch.save(test_data, 'data/test_data.pt')
+        torch.save(train_data, 'data/digits_train_data.pt')
+        torch.save(test_data, 'data/digits_test_data.pt')
 
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
     test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=True)
@@ -221,7 +221,7 @@ if __name__ == '__main__':
     """
     print("------ Find visualisations in the /viz directory ------")
     n_b = 4
-    train_loader, test_loader = get_data_loaders(4)
+    train_loader, test_loader = digits_get_data_loaders(4)
     image_batch, audio_batch, label_batch = next(iter(train_loader))
     print(f"Image batch shape: {image_batch.shape}")
     print(f"Audio batch shape: {audio_batch.shape}")
@@ -232,7 +232,9 @@ if __name__ == '__main__':
         axes[0, i].imshow(image_batch[i].squeeze(), cmap='gray')
         axes[0, i].set_title(f"Label: {label_batch[i]}")
         axes[1, i].imshow(audio_batch[i].squeeze(), cmap='gray')
-    plt.savefig('viz/batch.png')
+    if not os.path.exists('viz/written_spoken_digits'):
+        os.mkdir('viz/written_spoken_digits')
+    plt.savefig('viz/written_spoken_digits/batch.png')
     # Plot bar chart of number of samples in each class
     # plt.figure()
     # plt.bar(range(10), [len(train_loader.dataset[i]) for i in range(10)])

@@ -1,14 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=mnist                     # Job name
-#SBATCH --partition=gpu                    # Specify the partition/queue name
+#SBATCH --job-name=data                  # Job name
+#SBATCH --partition=cpu                 # Specify the partition/queue name
 #SBATCH --nodes=1                          # Number of nodes
 #SBATCH --ntasks=1                         # Number of tasks (cores)
 #SBATCH --cpus-per-task=1                  # Number of CPU cores per task
-#SBATCH --gres=gpu:1                       # Define number of GPUs per node, can also define type of GPU eg. gpu:tesla, gpu:k80, gpu:p100, gpu:v100
-#SBATCH --mem-per-gpu=5G                   # Define memory per GPU
+#SBATCH --mem=35G                   # Define memory per GPU
 #SBATCH --time=20:00:00                    # Wall time (hh:mm:ss)
 #SBATCH --mail-user=jd18380@bristol.ac.uk  # Email address for job notifications
-#SBATCH --mail-type=END                    # Email notifications (BEGIN, END, FAIL)
+#SBATCH --mail-type=END,FAIL                   # Email notifications (BEGIN, END, FAIL)
+#SBATCH --account=MATH026823
 
 # Define executable
 export EXE=/bin/hostname
@@ -37,7 +37,9 @@ source .venv/bin/activate
 # Where we run the script to perform training run with model, 
 # first argument to this job script will be the python script to run,
 # the rest of the arguments passed to the job script will be passed as arguments to the python script
-python $1 ${@:2}
+python data_nyu_v2.py
+# python data_nyu_v2_2.py
+# python data_cub200.py
 
 # End of job script, let's print the time at which we finished
 echo End Time: $(date)

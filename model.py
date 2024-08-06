@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
-from torchvision import transforms
+from torchvision import models
 
 class MNIST_Image_CNN(nn.Module):
     def __init__(self, output_dim=64):
@@ -23,28 +23,6 @@ class MNIST_Image_CNN(nn.Module):
         x = x.view(n_b, -1)
         x = self.fc1(x)
         return x
-
-class MLP(nn.Module):
-    """ A multi layer perceptron for representation learning. """
-    def __init__(self, input_dim=784, hidden_dim=256, output_dim=64, num_layers=3):
-        super().__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.output_dim = output_dim
-        self.num_layers = num_layers
-        
-        # Define the layers
-        self.layers = nn.ModuleList([nn.Linear(self.input_dim, self.hidden_dim)])
-        for _ in range(self.num_layers - 1):
-            self.layers.append(nn.Linear(self.hidden_dim, self.hidden_dim))
-            self.layers.append(nn.Dropout(0.5))
-        self.layers.append(nn.Linear(self.hidden_dim, self.output_dim))
-
-    def forward(self, x):
-        x = x.reshape(x.shape[0], -1)
-        for layer in self.layers[:-1]:
-            x = F.relu(layer(x))
-        return self.layers[-1](x)
 
 class MNIST_Audio_CNN(nn.Module):
     def __init__(self, output_dim=64):
@@ -160,9 +138,133 @@ class LinearClassifier(nn.Module):
         
     def forward(self, x):
         return self.layer(x)
+
+
+class ResNet101(nn.Module):
+    def __init__(self, output_dim=64):
+        super(ResNet101, self).__init__()
+        self.resnet = models.resnet101(pretrained=False)
+        
+        if output_dim != 2048:
+            raise ValueError("Currently output dimension must be 2048 for ResNetSegmentation")
+        self.output_dim = output_dim
+        # Remove the last fully connected layer
+        self.resnet = nn.Sequential(*list(self.resnet.children())[1:-2])
+        self.rgb_conv = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.depth_conv = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.fusion_mlp = nn.Sequential(
+            nn.ReLU(),
+            nn.Conv2d(in_channels=4096, out_channels=2048, kernel_size=1),
+            nn.ReLU(),
+            nn.AdaptiveMaxPool2d(1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(2048, self.output_dim)
+        )
+        
+        self.critic = nn.Sequential(
+            nn.Linear(self.output_dim*2, 4),
+        )
+        
+    def forward(self, x):
+        x_rgb, x_depth = x
+        x_rgb = self.resnet(self.rgb_conv(x_rgb))
+        x_depth = self.resnet(self.depth_conv(x_depth))
+        x = torch.cat((x_rgb, x_depth), dim=1)
+        x = self.fusion_mlp(x)
+        return x
+
+    def score(self, u, v):
+        concat = torch.cat((u, v), dim=1)
+        return self.critic(concat)
     
+class ResNet50(nn.Module):
+    def __init__(self, output_dim=64):
+        super(ResNet50, self).__init__()
+        self.resnet = models.resnet50(pretrained=False)
+        
+        if output_dim != 2048:
+            raise ValueError("Currently output dimension must be 2048 for ResNetSegmentation")
+        self.output_dim = output_dim
+        # Remove the last fully connected layer
+        self.resnet = nn.Sequential(*list(self.resnet.children())[1:-1])
+        self.rgb_conv = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.depth_conv = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.fusion_mlp = nn.Sequential(
+            nn.Flatten(),
+            nn.ReLU(),
+            nn.Linear(4096, 2048),
+            nn.ReLU(),
+            nn.Linear(2048, self.output_dim),
+        )
+        
+        self.critic = nn.Sequential(
+            nn.Linear(self.output_dim*2, 4),
+        )
+        
+    def forward(self, x):
+        x_rgb, x_depth = x
+
+        x_rgb = self.rgb_conv(x_rgb)
+        x_rgb = self.resnet(x_rgb)
+
+        x_depth = self.depth_conv(x_depth)
+        x_depth = self.resnet(x_depth)
+        
+        x = torch.cat((x_rgb, x_depth), dim=1)
+        x = self.fusion_mlp(x)
+        return x
+
+    def score(self, u, v):
+        concat = torch.cat((u, v), dim=1)
+        return self.critic(concat)
+
+
+class SegClassifier(nn.Module):
+    """ To be used for segmentation tasks with ResNetSegmentation. """
+    def __init__(self, num_classes):
+        super(SegClassifier, self).__init__()
+
+        self.decoder = nn.Sequential(
+            nn.Conv2d(2048, 512, kernel_size=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
+            
+            nn.Conv2d(512, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
+            
+            nn.Conv2d(256, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
+            
+            nn.Conv2d(128, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
+            
+            nn.Conv2d(64, num_classes, kernel_size=1),
+        )
+        
+    def forward(self, x):
+        # Unflatten (N, 2048) -> (N, 2048, 1, 1)
+        x = x.unsqueeze(2).unsqueeze(3)
+        x = self.decoder(x)
+        print(x.shape)
+        return x
+  
+# Could also do: other ResNets, https://huggingface.co/nvidia/mit-b3, https://pytorch.org/vision/stable/models/vision_transformer.html
+
 if __name__ == '__main__':
     print(MNIST_Image_CNN())
     print(MNIST_Audio_CNN())
+    print(ImageModel(64))
+    print(AudioModel(64))
     print(FusionModel(64))
     print(LinearClassifier(64, 10))
+    print(ResNet101(2048))
+    print(SegClassifier(13))
+    print(models.resnet50(pretrained=False))
