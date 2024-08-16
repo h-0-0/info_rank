@@ -8,6 +8,17 @@ from torchvision.datasets.utils import download_url
 import matplotlib.pyplot as plt
 from nyuv2 import NYUv2
 
+rgb_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+depth_transform = transforms.Compose([
+            lambda x: np.expand_dims(x, axis=-1),
+            lambda x: x.astype('float16'),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[2.6738], std=[1.5146]),
+        ])
+
 class NyuDepthDataset(IterableDataset):
     """
     A PyTorch Dataset for the NYU Depth V2 dataset (https://cs.nyu.edu/~fergus/datasets/nyu_depth_v2.html).
@@ -19,16 +30,8 @@ class NyuDepthDataset(IterableDataset):
     def __init__(self, tfds_data, has_label=False):
         data = tfds.as_numpy(tfds_data)
         self.data = data
-        self.image_transform = transforms.Compose([
-            transforms.ToTensor(),
-            # transforms.Normalize(mean=[0.0038, 0.0033, 0.0031], std=[0.0256, 0.0263, 0.0276]),
-        ])
-        self.depth_transform = transforms.Compose([
-            lambda x: np.expand_dims(x, axis=-1),
-            lambda x: x.astype('float32'),
-            transforms.ToTensor(),
-            # transforms.Normalize(mean=[8.2974e-05], std=[0.0005]),
-        ])
+        self.image_transform = rgb_transform
+        self.depth_transform = depth_transform
         if has_label:
             self.get_sample = self.get_sample_with_label
         else:
@@ -52,7 +55,6 @@ class NyuDepthDataset(IterableDataset):
     def get_sample_with_label(self):
         sample = next(self.data_iter)
         # Convert to PyTorch tensors
-        print(sample)
         image, depth, label = sample['image'], sample['depth'], sample['label']
         image = self.image_transform(image)
         depth = self.depth_transform(depth)
@@ -84,12 +86,12 @@ def get_nyu_v2():
     train_set, test_set = download_nyu_v2()
     ds_train = NyuDepthDataset(train_set)
     ds_test = NyuDepthDataset(test_set) # We dont actally use this.
-  
+    
     t = transforms.Compose([transforms.ToTensor(), transforms.Resize((240, 320))])
     ds_train_supervised = NYUv2('data/NYUv2',  download=True, train=True,
-        rgb_transform=t, seg_transform=t, depth_transform=t)
+        rgb_transform=rgb_transform, seg_transform=t, depth_transform=depth_transform)
     ds_test_supervised = NYUv2('data/NYUv2', download=True, train=False,
-        rgb_transform=t, seg_transform=t, depth_transform=t)
+        rgb_transform=rgb_transform, seg_transform=t, depth_transform=depth_transform)
     
     return ds_train, ds_test, ds_train_supervised, ds_test_supervised
 
@@ -111,12 +113,12 @@ def nyu_v2_get_data_loaders(batch_size: int):
     ds_train, ds_test, ds_train_supervised, ds_test_supervised = get_nyu_v2()
 
     # these dont need shuffling (handled through tdfs)
-    train_loader = DataLoader(ds_train, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(ds_test, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(ds_train, batch_size=batch_size, shuffle=False, pin_memory=True)
+    test_loader = DataLoader(ds_test, batch_size=batch_size, shuffle=False, pin_memory=True)
 
     # these need shuffling
-    train_supervised_loader = DataLoader(ds_train_supervised, batch_size=batch_size, shuffle=True)
-    test_supervised_loader = DataLoader(ds_test_supervised, batch_size=batch_size, shuffle=False)
+    train_supervised_loader = DataLoader(ds_train_supervised, batch_size=batch_size, shuffle=True, pin_memory=True)
+    test_supervised_loader = DataLoader(ds_test_supervised, batch_size=batch_size, shuffle=False, pin_memory=True)
     return train_loader, test_loader, train_supervised_loader, test_supervised_loader
 
 def compute_norm():
@@ -125,21 +127,33 @@ def compute_norm():
     std = torch.zeros(3)
     total_images = 0
     # Iterate through the DataLoader
-    mean = 0.
-    var = 0.
+    rgb_mean = 0.
+    rgb_var = 0.
+    depth_mean = 0.
+    depth_var = 0.
     nb_samples = 0.
-    for _, data in train_loader:
-        batch_samples = data.size(0)
-        # data = data.view(batch_samples, data.size(1), -1)
-        mean += data.mean((0,2,3))
-        var += data.var((0,2,3))
-        nb_samples += batch_samples
+    batch_counter = 0
+    for rgb, depth in train_loader:
+        batch_samples = rgb.size(0)
 
-    mean /= nb_samples
-    std = torch.sqrt(var / nb_samples)
-    print(mean/255)
-    print(std/255)
-    return mean, std
+        rgb_mean += rgb.mean((0,2,3))
+        rgb_var += rgb.var((0,2,3))
+        
+        depth_mean += depth.mean((0,2,3))
+        depth_var += depth.var((0,2,3))
+
+        nb_samples += batch_samples
+        batch_counter += 1
+
+    rgb_mean /= batch_counter
+    rgb_std = torch.sqrt(rgb_var / batch_counter)
+
+    depth_mean /= batch_counter
+    depth_std = torch.sqrt(depth_var / batch_counter)
+
+    print(f'RGB mean: {rgb_mean}, RGB std: {rgb_std}')  
+    print(f'Depth mean: {depth_mean}, Depth std: {depth_std}')
+
 
 def viz(rgb_images, depth_images, labels=None):
     n_images = len(rgb_images)
