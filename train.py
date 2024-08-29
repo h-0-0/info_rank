@@ -195,11 +195,15 @@ def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size
     if 'linear' in classifier_type:
         _, num_classes = classifier_type.split('_')
         num_classes = int(num_classes)
-        classifier = LinearClassifier(model.output_dim, num_classes).to(device)
-        fuse_opt = False
-    elif classifier_type == 'seg':
-        classifier = SegClassifier(14).to(device)
-        fuse_opt = True
+        classifier = LinearClassifier(model.output_dim, num_classes)
+        classifier = MyDataParallel(classifier)
+        classifier = classifier.to(device)
+    elif 'seg' in classifier_type:
+        _, num_classes = classifier_type.split('_')
+        num_classes = int(num_classes)
+        classifier = SegClassifier(num_classes)
+        classifier = MyDataParallel(classifier)
+        classifier = classifier.to(device)
     learning_rate = 0.1 * batch_size / 256
     optimizer = optim.SGD(model.parameters(), lr=learning_rate)
     for param in model.parameters():
@@ -208,6 +212,7 @@ def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size
     # Train the linear classifier
     cum_b = -1
     num_epochs = 50
+    scaler = torch.amp.GradScaler()
     for epoch in range(num_epochs):
         for b, (modality0, modality1, labels) in enumerate(train_loader):
             cum_b += 1
@@ -226,15 +231,17 @@ def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size
             with torch.no_grad():
                 rep = model(batch)
 
-            with warnings.catch_warnings(action="ignore", category=FutureWarning): # Suppress harmless FutureWarning from PyTorch
-                with torch.autocast('cuda' if torch.cuda.is_available() else 'cpu'):
-                    optimizer.zero_grad()
-                    logits = classifier(rep)
-                    loss = nn.CrossEntropyLoss()(logits, labels)
+            with torch.autocast('cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float16):
+                optimizer.zero_grad()
+                logits = classifier(rep)
+                loss = nn.CrossEntropyLoss()(logits, labels)
 
             # Backward pass and optimization
-            loss.backward()
-            optimizer.step()
+            # loss.backward()
+            scaler.scale(loss).backward()
+            # optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             optimizer.zero_grad() # We zero gradients to save memory
             
             writer.add_scalar('Eval/train_loss', loss.item(), cum_b)
@@ -365,12 +372,12 @@ def train(**kwargs):
         model = ResNet101(output_dim=output_dim)
         model = MyDataParallel(model)
         modality = 'image+depth'
-        classifier_type = 'seg'
+        classifier_type = 'seg_13' if benchmark == "nyu_v2_13" else 'seg_40'
     elif model == "ResNet50":
         model = ResNet50(output_dim=output_dim)
         model = MyDataParallel(model)
         modality = 'image+depth'
-        classifier_type = 'seg'
+        classifier_type = 'seg_13' if benchmark == "nyu_v2_13" else 'seg_40'
     elif model == "MosiFusion":
         model = MosiFusion(output_dim=output_dim)
         modality = 'image_ft+audio_ft+text'
