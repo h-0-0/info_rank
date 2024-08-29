@@ -37,9 +37,7 @@ source .venv/bin/activate
 # Where we run the script to perform training run with model, 
 # first argument to this job script will be the python script to run,
 # the rest of the arguments passed to the job script will be passed as arguments to the python script
-python data_nyu_v2.py
-# python data_nyu_v2_2.py
-# python data_cub200.py
+python data_mosi_mosei.py
 
 # End of job script, let's print the time at which we finished
 echo End Time: $(date)

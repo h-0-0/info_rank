@@ -2,7 +2,9 @@
 author: Mihai Suteu
 date: 15/05/19
 """
-
+# Thank you Mihai for this script!
+# this is used for loading in the labelled portion of the NYUv2 dataset with the segmentation masks.
+# I have edited it slighlty so that it returns the RGB image, the depth image and the segmentation mask in that order.
 
 import os
 import sys
@@ -18,18 +20,7 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision.datasets.utils import download_url
-from torchvision import transforms
 
-rgb_transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.0038, 0.0033, 0.0031], std=[0.0256, 0.0263, 0.0276]),
-])
-depth_transform = transforms.Compose([
-    lambda x: np.expand_dims(x, axis=-1),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[8.2974e-05], std=[0.0005]),
-])
-seg_transform = transforms.Compose([ transforms.ToTensor() ])
 
 class NYUv2(Dataset):
     """
@@ -46,7 +37,9 @@ class NYUv2(Dataset):
     background) classes. Conversion to int will happen automatically if
     transformation ends in a tensor.
 
-    3. Depth Images: 1 channel with floats representing the distance in meters.
+    3. Surface Normals: 3 channels, with values in [0, 1].
+
+    4. Depth Images: 1 channel with floats representing the distance in meters.
     Conversion will happen automatically if transformation ends in a tensor.
     """
 
@@ -55,9 +48,10 @@ class NYUv2(Dataset):
         root: str,
         train: bool = True,
         download: bool = False,
-        rgb_transform=rgb_transform,
-        seg_transform=seg_transform,
-        depth_transform=depth_transform,
+        rgb_transform=None,
+        seg_transform=None,
+        sn_transform=None,
+        depth_transform=None,
     ):
         """
         Will return tuples based on what data source has been enabled (rgb, seg etc).
@@ -78,8 +72,9 @@ class NYUv2(Dataset):
         self.root = root
 
         self.rgb_transform = rgb_transform
-        self.depth_transform = depth_transform
         self.seg_transform = seg_transform
+        self.sn_transform = sn_transform
+        self.depth_transform = depth_transform
 
         self.train = train
         self._split = "train" if train else "test"
@@ -106,15 +101,6 @@ class NYUv2(Dataset):
             img = self.rgb_transform(img)
             imgs.append(img)
 
-        if self.seg_transform is not None:
-            random.seed(seed)
-            img = Image.open(os.path.join(folder("seg13"), self._files[index]))
-            img = self.seg_transform(img)
-            if isinstance(img, torch.Tensor):
-                # ToTensor scales to [0, 1] by default
-                img = (img * 255).long()
-            imgs.append(img)
-
         if self.depth_transform is not None:
             random.seed(seed)
             img = Image.open(os.path.join(folder("depth"), self._files[index]))
@@ -122,6 +108,22 @@ class NYUv2(Dataset):
             if isinstance(img, torch.Tensor):
                 # depth png is uint16
                 img = img.float() / 1e4
+            imgs.append(img)
+
+        if self.seg_transform is not None:
+            random.seed(seed)
+            img = Image.open(os.path.join(folder("seg13"), self._files[index]))
+            img = self.seg_transform(img)
+            if isinstance(img, torch.Tensor):
+                # ToTensor scales to [0, 1] by default
+                img = (img * 255).long()
+            img = img.squeeze(0)
+            imgs.append(img)
+
+        if self.sn_transform is not None:
+            random.seed(seed)
+            img = Image.open(os.path.join(folder("sn"), self._files[index]))
+            img = self.sn_transform(img)
             imgs.append(img)
 
         return imgs
@@ -138,13 +140,17 @@ class NYUv2(Dataset):
         fmt_str += "{0}{1}\n".format(
             tmp, self.rgb_transform.__repr__().replace("\n", "\n" + " " * len(tmp))
         )
+        tmp = "    Depth Transforms: "
+        fmt_str += "{0}{1}\n".format(
+            tmp, self.depth_transform.__repr__().replace("\n", "\n" + " " * len(tmp))
+        )
         tmp = "    Seg Transforms: "
         fmt_str += "{0}{1}\n".format(
             tmp, self.seg_transform.__repr__().replace("\n", "\n" + " " * len(tmp))
         )
-        tmp = "    Depth Transforms: "
+        tmp = "    SN Transforms: "
         fmt_str += "{0}{1}\n".format(
-            tmp, self.depth_transform.__repr__().replace("\n", "\n" + " " * len(tmp))
+            tmp, self.sn_transform.__repr__().replace("\n", "\n" + " " * len(tmp))
         )
         return fmt_str
 
@@ -155,11 +161,12 @@ class NYUv2(Dataset):
         try:
             for split in ["train", "test"]:
                 for part, transform in zip(
-                    ["rgb", "seg13", "depth"],
+                    ["rgb", "depth", "seg13", "sn"],
                     [
                         self.rgb_transform,
-                        self.seg_transform,
                         self.depth_transform,
+                        self.seg_transform,
+                        self.sn_transform,
                     ],
                 ):
                     if transform is None:
@@ -176,10 +183,12 @@ class NYUv2(Dataset):
             return
         if self.rgb_transform is not None:
             download_rgb(self.root)
-        if self.seg_transform is not None:
-            download_seg(self.root)
         if self.depth_transform is not None:
             download_depth(self.root)
+        if self.seg_transform is not None:
+            download_seg(self.root)
+        if self.sn_transform is not None:
+            download_sn(self.root)
         print("Done!")
 
 
@@ -217,6 +226,30 @@ def download_seg(root: str):
 
     _proc(train_url, os.path.join(root, "train_seg13"))
     _proc(test_url, os.path.join(root, "test_seg13"))
+
+
+def download_sn(root: str):
+    url = "https://www.dropbox.com/s/dn5sxhlgml78l03/nyu_normals_gt.zip"
+    train_dst = os.path.join(root, "train_sn")
+    test_dst = os.path.join(root, "test_sn")
+
+    if not os.path.exists(train_dst) or not os.path.exists(test_dst):
+        tar = os.path.join(root, url.split("/")[-1])
+        if not os.path.exists(tar):
+            req = requests.get(url + "?dl=1") # dropbox
+            with open(tar, 'wb') as f:
+                f.write(req.content)
+        if os.path.exists(tar):
+            _unpack(tar)
+            if not os.path.exists(train_dst):
+                _replace_folder(
+                    os.path.join(root, "nyu_normals_gt", "train"), train_dst
+                )
+                _rename_files(train_dst, lambda x: x[1:])
+            if not os.path.exists(test_dst):
+                _replace_folder(os.path.join(root, "nyu_normals_gt", "test"), test_dst)
+                _rename_files(test_dst, lambda x: x[1:])
+            shutil.rmtree(os.path.join(root, "nyu_normals_gt"))
 
 
 def download_depth(root: str):
@@ -293,6 +326,3 @@ def _create_depth_files(mat_file: str, root: str, train_ids: list):
         folder = "train" if id_ in train_ids else "test"
         save_path = os.path.join(root, f"{folder}_depth", id_ + ".png")
         Image.fromarray(img).save(save_path)
-
-if __name__ == "__main__":
-    ds = NYUv2('data', download=True)

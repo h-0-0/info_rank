@@ -52,6 +52,7 @@ class NYUv2(Dataset):
         seg_transform=None,
         sn_transform=None,
         depth_transform=None,
+        num_classes=13,
     ):
         """
         Will return tuples based on what data source has been enabled (rgb, seg etc).
@@ -70,6 +71,10 @@ class NYUv2(Dataset):
         """
         super().__init__()
         self.root = root
+        if num_classes not in [13, 40]:
+            raise ValueError("Invalid number of classes. Must be 13 or 40")
+        self.num_classes = num_classes
+        self.seg = 'seg13' if num_classes == 13 else 'seg40'
 
         self.rgb_transform = rgb_transform
         self.seg_transform = seg_transform
@@ -112,11 +117,12 @@ class NYUv2(Dataset):
 
         if self.seg_transform is not None:
             random.seed(seed)
-            img = Image.open(os.path.join(folder("seg13"), self._files[index]))
+            img = Image.open(os.path.join(folder(self.seg), self._files[index]))
             img = self.seg_transform(img)
             if isinstance(img, torch.Tensor):
                 # ToTensor scales to [0, 1] by default
                 img = (img * 255).long()
+            img = img.squeeze(0)
             imgs.append(img)
 
         if self.sn_transform is not None:
@@ -160,7 +166,7 @@ class NYUv2(Dataset):
         try:
             for split in ["train", "test"]:
                 for part, transform in zip(
-                    ["rgb", "depth", "seg13", "sn"],
+                    ["rgb", "depth", self.seg, "sn"],
                     [
                         self.rgb_transform,
                         self.depth_transform,
@@ -185,7 +191,7 @@ class NYUv2(Dataset):
         if self.depth_transform is not None:
             download_depth(self.root)
         if self.seg_transform is not None:
-            download_seg(self.root)
+            download_seg(self.root, self.num_classes)
         if self.sn_transform is not None:
             download_sn(self.root)
         print("Done!")
@@ -209,9 +215,15 @@ def download_rgb(root: str):
     _proc(test_url, os.path.join(root, "test_rgb"))
 
 
-def download_seg(root: str):
-    train_url = "https://github.com/ankurhanda/nyuv2-meta-data/raw/master/train_labels_13/nyuv2_train_class13.tgz"
-    test_url = "https://github.com/ankurhanda/nyuv2-meta-data/raw/master/test_labels_13/nyuv2_test_class13.tgz"
+def download_seg(root: str, num_classes: int):
+    if num_classes not in [13, 40]:
+        raise ValueError("Invalid number of classes. Must be 13 or 40")
+    if num_classes == 13:
+        train_url = "https://github.com/ankurhanda/nyuv2-meta-data/raw/master/train_labels_13/nyuv2_train_class13.tgz"
+        test_url = "https://github.com/ankurhanda/nyuv2-meta-data/raw/master/test_labels_13/nyuv2_test_class13.tgz"
+    else:
+        train_url = "https://github.com/h-0-0/nyuv2-meta-data/raw/master/train_labels_40/nyuv2_train_class40.tgz"
+        test_url = "https://github.com/h-0-0/nyuv2-meta-data/raw/master/test_labels_40/nyuv2_test_class40.tgz"
 
     def _proc(url: str, dst: str):
         if not os.path.exists(dst):
@@ -223,8 +235,12 @@ def download_seg(root: str):
                 _replace_folder(tar.rstrip(".tgz"), dst)
                 _rename_files(dst, lambda x: x.split("_")[3])
 
-    _proc(train_url, os.path.join(root, "train_seg13"))
-    _proc(test_url, os.path.join(root, "test_seg13"))
+    if num_classes == 13:
+        _proc(train_url, os.path.join(root, "train_seg13"))
+        _proc(test_url, os.path.join(root, "test_seg13"))
+    else:
+        _proc(train_url, os.path.join(root, "train_seg40"))
+        _proc(test_url, os.path.join(root, "test_seg40"))
 
 
 def download_sn(root: str):

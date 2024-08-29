@@ -4,6 +4,7 @@ import torch
 from torchvision import transforms as iT
 from torchaudio import transforms as aT
 from utils import generate_binary_combinations, swap_halves, dual_batch_indice_permutation, create_distribution, rnd_idx_without
+import math
 
 def cosine_sim(y, temperature=0.1):
     """ Scoring function (cosine similarity)."""
@@ -40,7 +41,6 @@ def image_aug(x, type='mnist'):
         raise ValueError("Invalid type, must be one of: 'mnist', 'nyu-rgb', 'nyu-depth'")
     aug_x = augmentations(x)
     return aug_x
-# TODO: Speed up above, think it's not optimal
 
 def audio_aug(x):
     """
@@ -67,7 +67,6 @@ def image_audio_aug(batch, device=None):
         audio1 = audio1.to(device)
         audio2 = audio2.to(device)
     return (image1, audio1), (image2, audio2)
-# TODO: pass augmentaion selection, rename above image_audio_aug
 
 def augmenter(batch, modality, device):
     batch = [b.to(device) for b in batch] if not torch.is_tensor(batch) else batch.to(device)
@@ -139,9 +138,7 @@ def _info_critic_acc(scores, device):
 #             else:
 #                 l = F.cross_entropy(s, torch.empty(s.shape[0], dtype=torch.long).fill_(i).to(device), reduction='mean')
 #                 losses.append(l)
-
 #     if acc:
-#         print(torch.cuda.max_memory_allocated(), flush=True)
 #         return _info_critic_acc(scores, device)
 
 #     # We then sum the losses and return them
@@ -227,10 +224,46 @@ def info_critic_plus(model, batch1, batch2, temperature, device, acc=False):
 
     return sum(loss) / len(loss)
 
+def _prob_loss_single_modality(model, batch1, batch2, temperature, device, acc=False):
+    # Set up parameters
+    num_modalities = 1
+    n_b = batch1.shape[0]
+    n = n_b*2
+    pi = create_distribution(2)
+    ns = [math.ceil(n*p) for p in pi]
+
+    pos_idxs = torch.cat([torch.stack([torch.arange(0, n_b), torch.arange(n_b, 2*n_b)], dim=0), torch.stack([torch.arange(n_b, 2*n_b), torch.arange(0, n_b)], dim=0)], dim=1)
+    batch = torch.cat([batch1, batch2], dim=0)
+    loss =0
+
+    base_idxs = pos_idxs[:, torch.randperm(pos_idxs.shape[1])[:ns[0]]]
+    u = model(batch[base_idxs[0]])
+    v = model(batch[base_idxs[1]])
+    pos_score = model.score(u, v)
+    loss += pi[0] * F.cross_entropy(pos_score, torch.empty(ns[0], dtype=torch.long).fill_(0).to(device))
+
+    base_idxs = pos_idxs[:, torch.randperm(pos_idxs.shape[1])[:ns[1]]]
+    dist_idxs = torch.tensor([rnd_idx_without(0, 2*n_b, base_idxs[:,j]) for j in range(ns[1])])
+    u = model(batch[base_idxs[0]])
+    v = model(batch[dist_idxs])
+    neg_score = model.score(u, v)
+    loss += pi[1] * F.cross_entropy(neg_score, torch.empty(ns[1], dtype=torch.long).fill_(1).to(device))
+    
+    if acc:
+        # Compute accuracy
+        predictions = torch.cat([pos_score.argmax(dim=1), neg_score.argmax(dim=1)], dim=0)
+        labels = torch.cat([torch.zeros(pos_score.shape[0]), torch.ones(neg_score.shape[0])], dim=0).to(device)
+        accuracy = (predictions == labels).float().mean()
+        accs = {'accuracy': accuracy}
+        return accs
+    
+    return loss
 
 def prob_loss(model, batch1, batch2, temperature, device, acc=False):
     # Set up parameters
     num_modalities = len(batch1) if not torch.is_tensor(batch1) else 1
+    if num_modalities == 1:
+        return _prob_loss_single_modality(model, batch1, batch2, temperature, device, acc)
     n_b = batch1[0].shape[0] if num_modalities > 1 else batch1.shape[0]
     to_disturb = generate_binary_combinations(num_modalities)
     n = n_b*len(to_disturb)

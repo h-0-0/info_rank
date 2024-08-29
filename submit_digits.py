@@ -28,15 +28,15 @@ if  __name__ == "__main__":
     }
     prob_loss = {
         'est': ['prob_loss'],
-        'learning_rate': [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8],
+        'learning_rate': [5e-2, 1e-2, 5e-3, 1e-3],
         'temperature' : [1],
         'output_dim': [64],
     }
     decomposed_loss = {
         'est': ['decomposed_loss'],
-        'learning_rate': [5e-7, 1e-7, 5e-8],
+        'learning_rate': [1e-7],
         'temperature' : [1],
-        'output_dim': [64],
+        'output_dim': [64, 32, 16, 8, 4, 2],
     }
     supervised = {
         'est': ['supervised'],
@@ -47,9 +47,9 @@ if  __name__ == "__main__":
 
     # Join dictionary
     # to_search.update(SimCLR) #✅
-    # to_search.update(info_critic) #✅ # Make learing rate much smaller for good performance on AudioOnly
-    # to_search.update(info_critic_plus) # Make learing rate much smaller for good performance on AudioOnly
-    # to_search.update(prob_loss)
+    # to_search.update(info_critic) #✅ Make learing rate much smaller for good performance on AudioOnly
+    # to_search.update(info_critic_plus) #✅ Make learing rate much smaller for good performance on AudioOnly
+    # to_search.update(prob_loss) # Make learing rate much smaller for good performance on AudioOnly (1e-06)
     # to_search.update(decomposed_loss)
     to_search.update(supervised) #✅
     # TODO: tick above when done

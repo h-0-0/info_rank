@@ -41,7 +41,10 @@ if  __name__ == "__main__":
         'learning_rate': [args.learning_rate],
     }
     print("Searching Over: ", config, flush=True)
-    grid = slune.searchers.SearcherGrid(config, runs=1)
+    if args.benchmark == 'written_spoken_digits':
+        grid = slune.searchers.SearcherGrid(config, runs=10)
+    else:
+        grid = slune.searchers.SearcherGrid(config, runs=1)
     # grid.check_existing_runs(slune.get_csv_saver(root_dir='results'))
     for g in grid:
         # Add the net to the config

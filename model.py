@@ -143,7 +143,7 @@ class LinearClassifier(nn.Module):
 class ResNet101(nn.Module):
     def __init__(self, output_dim=64):
         super(ResNet101, self).__init__()
-        self.resnet = models.resnet101(pretrained=False)
+        self.resnet = models.resnet101(weights=None)
         
         if output_dim != 2048:
             raise ValueError("Currently output dimension must be 2048 for ResNetSegmentation")
@@ -168,8 +168,19 @@ class ResNet101(nn.Module):
         
     def forward(self, x):
         x_rgb, x_depth = x
-        x_rgb = self.resnet(self.rgb_conv(x_rgb))
-        x_depth = self.resnet(self.depth_conv(x_depth))
+
+        # x_rgb = self.rgb_conv(x_rgb)
+        # x_rgb = self.resnet(x_rgb)
+
+        x_rgb = torch.utils.checkpoint.checkpoint(self.rgb_conv, x_rgb, use_reentrant=False)
+        x_rgb = torch.utils.checkpoint.checkpoint(self.resnet, x_rgb, use_reentrant=False)
+
+        # x_depth = self.depth_conv(x_depth)
+        # x_depth = self.resnet(x_depth)
+
+        x_depth = torch.utils.checkpoint.checkpoint(self.depth_conv, x_depth, use_reentrant=False)
+        x_depth = torch.utils.checkpoint.checkpoint(self.resnet, x_depth, use_reentrant=False)
+
         x = torch.cat((x_rgb, x_depth), dim=1)
         x = self.fusion_mlp(x)
         return x
@@ -181,7 +192,7 @@ class ResNet101(nn.Module):
 class ResNet50(nn.Module):
     def __init__(self, output_dim=64):
         super(ResNet50, self).__init__()
-        self.resnet = models.resnet50(pretrained=False)
+        self.resnet = models.resnet50(weights=None)
         
         if output_dim != 2048:
             raise ValueError("Currently output dimension must be 2048 for ResNetSegmentation")
@@ -205,11 +216,17 @@ class ResNet50(nn.Module):
     def forward(self, x):
         x_rgb, x_depth = x
 
-        x_rgb = self.rgb_conv(x_rgb)
-        x_rgb = self.resnet(x_rgb)
+        # x_rgb = self.rgb_conv(x_rgb)
+        # x_rgb = self.resnet(x_rgb)
 
-        x_depth = self.depth_conv(x_depth)
-        x_depth = self.resnet(x_depth)
+        x_rgb = torch.utils.checkpoint.checkpoint(self.rgb_conv, x_rgb, use_reentrant=False)
+        x_rgb = torch.utils.checkpoint.checkpoint(self.resnet, x_rgb, use_reentrant=False)
+
+        # x_depth = self.depth_conv(x_depth)
+        # x_depth = self.resnet(x_depth)
+
+        x_depth = torch.utils.checkpoint.checkpoint(self.depth_conv, x_depth, use_reentrant=False)
+        x_depth = torch.utils.checkpoint.checkpoint(self.resnet, x_depth, use_reentrant=False)
         
         x = torch.cat((x_rgb, x_depth), dim=1)
         x = self.fusion_mlp(x)
@@ -226,37 +243,123 @@ class SegClassifier(nn.Module):
         super(SegClassifier, self).__init__()
 
         self.decoder = nn.Sequential(
-            nn.Conv2d(2048, 512, kernel_size=1),
-            nn.BatchNorm2d(512),
+            # First transposed convolution layer
+            nn.ConvTranspose2d(in_channels=2048, out_channels=1024, kernel_size=3, stride=2, padding=0),  # Output: (N, 1024, 8, 8)
             nn.ReLU(inplace=True),
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
-            
-            nn.Conv2d(512, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
+
+            nn.ConvTranspose2d(in_channels=1024, out_channels=512, kernel_size=4, stride=2, padding=0),  # Output: (N, 1024, 8, 8)
             nn.ReLU(inplace=True),
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
-            
-            nn.Conv2d(256, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
+            # # Second transposed convolution layer
+            nn.ConvTranspose2d(in_channels=512, out_channels=256, kernel_size=(3,5), stride=2, padding=0),  # Output: (N, 512, 22, 22)
             nn.ReLU(inplace=True),
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
-            
-            nn.Conv2d(128, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
+
+            # # Third transposed convolution layer
+            nn.ConvTranspose2d(in_channels=256, out_channels=128, kernel_size=(3,5), stride=2, padding=0),  # Output: (N, 256, 50, 50)
             nn.ReLU(inplace=True),
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
-            
-            nn.Conv2d(64, num_classes, kernel_size=1),
-        )
+
+            # # Fourth transposed convolution layer
+            nn.ConvTranspose2d(in_channels=128, out_channels=64, kernel_size=(3,5), stride=2, padding=0),  # Output: (N, 128, 106, 106)
+            nn.ReLU(inplace=True),
+
+            # # Fifth transposed convolution layer
+            nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=(3,5), stride=2, padding=0),   # Output: (N, 64, 218, 218)
+            nn.ReLU(inplace=True),
+
+            # Sixth transposed convolution layer
+            nn.ConvTranspose2d(in_channels=32, out_channels=16, kernel_size=(3,5), stride=2, padding=0),   # Output: (N, 32, 64, 64)
+            nn.ReLU(inplace=True),
+
+            # Seventh transposed convolution layer
+            nn.ConvTranspose2d(in_channels=16, out_channels=num_classes, kernel_size=2, stride=1, padding=0),   # Output: (N, 32, 64, 64)
+            nn.ReLU(inplace=True),
+        )        
         
     def forward(self, x):
         # Unflatten (N, 2048) -> (N, 2048, 1, 1)
         x = x.unsqueeze(2).unsqueeze(3)
         x = self.decoder(x)
-        print(x.shape)
+        x = x[:, :, :240, :320]
         return x
   
-# Could also do: other ResNets, https://huggingface.co/nvidia/mit-b3, https://pytorch.org/vision/stable/models/vision_transformer.html
+# TODO: Could also do: other ResNets, https://huggingface.co/nvidia/mit-b3, https://pytorch.org/vision/stable/models/vision_transformer.html
+
+class MosiFusion(nn.Module):
+    """Fusion model for MOSI dataset.
+    Consists of three LSTM encoders for vision, audio and text modalities.
+    The output of each encoder is concatenated and passed through an MLP.
+    """
+    def __init__(self, output_dim=64):
+        super(MosiFusion, self).__init__()
+
+        self.output_dim = output_dim
+
+        self.image_encoder = nn.LSTM(input_size=35, hidden_size=256, num_layers=2, batch_first=True)
+        self.audio_encoder = nn.LSTM(input_size=74, hidden_size=256, num_layers=2, batch_first=True)
+        self.text_encoder = nn.LSTM(input_size=300, hidden_size=256, num_layers=2, batch_first=True)
+
+        self.fusion_mlp = nn.Sequential(
+            nn.ReLU(),
+            nn.Linear(768, 256),
+            nn.ReLU(),
+            nn.Linear(256, self.output_dim),
+        )
+
+        self.critic = nn.Sequential(
+            nn.Linear(self.output_dim*2, 4),
+        )
+
+    def forward(self, batch):
+        image, audio, text = batch
+        image_repr = self.image_encoder(image)
+        audio_repr = self.audio_encoder(audio)
+        text_repr = self.text_encoder(text)
+        fused_repr = torch.cat((image_repr, audio_repr, text_repr), dim=1)
+        output = self.fusion_mlp(fused_repr)
+        return output
+    
+    def score(self, u, v):
+        concat = torch.cat((u, v), dim=1)
+        return self.critic(concat)
+        
+class MoseiFusion(nn.Module):
+    """Fusion model for MOSEI dataset.
+    Consists of three LSTM encoders for vision, audio and text modalities.
+    The output of each encoder is concatenated and passed through an MLP.
+    """
+    def __init__(self, output_dim=64):
+        super(MosiFusion, self).__init__()
+
+        self.output_dim = output_dim
+
+        self.image_encoder = nn.LSTM(input_size=713, hidden_size=256, num_layers=2, batch_first=True)
+        self.audio_encoder = nn.LSTM(input_size=74, hidden_size=256, num_layers=2, batch_first=True)
+        self.text_encoder = nn.LSTM(input_size=300, hidden_size=256, num_layers=2, batch_first=True)
+
+        self.fusion_mlp = nn.Sequential(
+            nn.ReLU(),
+            nn.Linear(1087, 256),
+            nn.ReLU(),
+            nn.Linear(256, self.output_dim),
+        )
+
+        self.critic = nn.Sequential(
+            nn.Linear(self.output_dim*2, 4),
+        )  
+
+    def forward(self, batch):
+        image, audio, text = batch
+        image_repr = self.image_encoder(image)
+        audio_repr = self.audio_encoder(audio)
+        text_repr = self.text_encoder(text)
+        fused_repr = torch.cat((image_repr, audio_repr, text_repr), dim=1)
+        output = self.fusion_mlp(fused_repr)
+        return output
+    
+    def score(self, u, v):
+        concat = torch.cat((u, v), dim=1)
+        return self.critic(concat)
+
+# TODO: could also try GRU
 
 if __name__ == '__main__':
     print(MNIST_Image_CNN())
@@ -267,4 +370,4 @@ if __name__ == '__main__':
     print(LinearClassifier(64, 10))
     print(ResNet101(2048))
     print(SegClassifier(13))
-    print(models.resnet50(pretrained=False))
+    print(ResNet50(2048))

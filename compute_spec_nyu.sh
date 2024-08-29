@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=1                  # Number of CPU cores per task
 #SBATCH --gres=gpu:1                       # Define number of GPUs per node, can also define type of GPU eg. gpu:tesla, gpu:k80, gpu:p100, gpu:v100
 #SBATCH --mem-per-gpu=16G                   # Define memory per GPU
-#SBATCH --time=50:00:00                    # Wall time (hh:mm:ss)
+#SBATCH --time=100:00:00                    # Wall time (hh:mm:ss)
 #SBATCH --mail-user=jd18380@bristol.ac.uk  # Email address for job notifications
 #SBATCH --mail-type=FAIL                   # Email notifications (BEGIN, END, FAIL)
 #SBATCH --account=MATH026823
@@ -33,7 +33,8 @@ echo Start Time: $(date)
 nvidia-smi --query-gpu=name --format=csv,noheader
 
 # Activate virtual environment (if you have one), change the path to match the location of your virtual environment
-source .venv/bin/activate
+# source .venv/bin/activate
+source .test_venv/bin/activate
 
 # Where we run the script to perform training run with model, 
 # first argument to this job script will be the python script to run,

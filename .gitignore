@@ -166,3 +166,4 @@ cython_debug/
 /viz
 /results
 slurm*
+/MultiBench

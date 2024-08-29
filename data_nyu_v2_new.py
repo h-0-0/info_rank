@@ -6,7 +6,8 @@ from torchvision import transforms
 import numpy as np
 from torchvision.datasets.utils import download_url
 import matplotlib.pyplot as plt
-from nyuv2 import NYUv2
+from nyuv2-python-toolkit.nyuv2 import NYUv2
+import subprocess
 
 rgb_transform = transforms.Compose([
             transforms.ToTensor(),
@@ -14,12 +15,12 @@ rgb_transform = transforms.Compose([
         ])
 depth_transform = transforms.Compose([
             lambda x: np.expand_dims(x, axis=-1),
+            lambda x: x.astype('float16'),
             transforms.ToTensor(),
-            transforms.ConvertImageDtype(torch.float16),
             transforms.Normalize(mean=[2.6738], std=[1.5146]),
         ])
 
-class NyuDepthDataset(IterableDataset):
+class NyuUnsupervisedDataset(IterableDataset):
     """
     A PyTorch Dataset for the NYU Depth V2 dataset (https://cs.nyu.edu/~fergus/datasets/nyu_depth_v2.html).
     We use the TensorFlow Datasets version of the dataset (https://www.tensorflow.org/datasets/catalog/nyu_depth_v2).
@@ -68,34 +69,58 @@ class NyuDepthDataset(IterableDataset):
             self.data_iter = iter(self.data)
             raise StopIteration
 
+def _download_labelled_nyu_v2():
+    """
+    Download the labelled NYUv2 dataset.
+    """
+    # Download the NYUv2 dataset
+    url = "http://horatio.cs.nyu.edu/mit/silberman/nyu_depth_v2/nyu_depth_v2_labeled.mat"
+    download_url(url, 'data', 'nyu_depth_v2_labeled.mat')
+    # Now we download the surface normals
+    url = "https://inf.ethz.ch/personal/ladickyl/nyu_normals_gt.zip"
+    download_url(url, 'data', 'nyu_normals_gt.zip')
+    subprocess.run('python extract_nyuv2.py --mat nyu_depth_v2_labeled.mat --normal_zip nyu_normals_gt.zip  --data_root NYUv2 --save_colored')
+
 def download_nyu_v2():
     """
     Download the NYUv2 dataset if it is not already downloaded and return the train and test datasets.
     """
+    # First we download large unlabelled set
     train_set = tfds.load(name="nyu_depth_v2", split="train", as_supervised=False, data_dir='data', shuffle_files=True)
     test_set = tfds.load(name="nyu_depth_v2", split="validation", as_supervised=False, data_dir='data', shuffle_files=False)
 
+    # Now we download the smaller labelled set
+    _download_labelled_nyu_v2()
     return train_set, test_set
 
-def get_nyu_v2(num_classes: int):
+def get_nyu_v2(num_classes):
     """
     Get the train and test datasets.
     Note that we use a Resize transform only on the supervised set, 
     we will use RandomlyResizedCrop on the unsupervised set during training.
+    
+    Args:
+        num_classes: The number of classes in the segmentation labels, either 40 or 13.
+
+    Returns:
+        ds_train: The unsupervised train dataset.
+        ds_test: The unsupervised test dataset.
+        ds_train_supervised: The supervised train dataset.
+        ds_test_supervised: The supervised test dataset.
     """
     train_set, test_set = download_nyu_v2()
-    ds_train = NyuDepthDataset(train_set)
-    ds_test = NyuDepthDataset(test_set) # We dont actally use this.
+    ds_train = NyuUnsupervisedDataset(train_set)
+    ds_test = NyuUnsupervisedDataset(test_set) # We dont actally use this.
     
     t = transforms.Compose([transforms.ToTensor(), transforms.Resize((240, 320))])
-    ds_train_supervised = NYUv2('data/NYUv2',  download=True, train=True, num_classes=num_classes,
+    ds_train_supervised = NYUv2('data/NYUv2',  download=True, split='train', num_classes=num_classes,
         rgb_transform=rgb_transform, seg_transform=t, depth_transform=depth_transform)
-    ds_test_supervised = NYUv2('data/NYUv2', download=True, train=False, num_classes=num_classes,
+    ds_test_supervised = NYUv2('data/NYUv2', download=True, split='test', num_classes=num_classes,
         rgb_transform=rgb_transform, seg_transform=t, depth_transform=depth_transform)
     
     return ds_train, ds_test, ds_train_supervised, ds_test_supervised
 
-def nyu_v2_get_data_loaders(batch_size: int, num_classes: int):
+def nyu_v2_get_data_loaders(batch_size: int):
     """
     Returns train and test set data loaders for the NYUv2 dataset (https://cs.nyu.edu/~fergus/datasets/nyu_depth_v2.html).
     We use the TensorFlow Datasets version of the dataset (https://www.tensorflow.org/datasets/catalog/nyu_depth_v2) for unsupervised training.
@@ -105,13 +130,12 @@ def nyu_v2_get_data_loaders(batch_size: int, num_classes: int):
 
     Args:
         batch_size: The batch size for the data loaders.
-        num_classes: The number of classes in the dataset, either 40 or 13.
 
     Returns:
         train_loader: The data loader for the train set.
         test_loader: The data loader for the test set.
     """
-    ds_train, ds_test, ds_train_supervised, ds_test_supervised = get_nyu_v2(num_classes)
+    ds_train, ds_test, ds_train_supervised, ds_test_supervised = get_nyu_v2()
 
     # these dont need shuffling (handled through tdfs)
     train_loader = DataLoader(ds_train, batch_size=batch_size, shuffle=False, pin_memory=True)

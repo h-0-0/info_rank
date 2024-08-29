@@ -1,5 +1,6 @@
 from data_digits import digits_get_data_loaders
 from data_nyu_v2 import nyu_v2_get_data_loaders
+from data_mosi_mosei import mosi_get_data_loaders, mosei_get_data_loaders
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -7,13 +8,14 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 from tensorboardX import SummaryWriter
-from utils import MyDataParallel, ckpt_monkey
+from utils import MyDataParallel
 import slune
 import os
-from model import FusionModel, LinearClassifier, ImageModel, AudioModel, ResNet101, SegClassifier, ResNet50
+from model import FusionModel, LinearClassifier, ImageModel, AudioModel, ResNet101, SegClassifier, ResNet50, MosiFusion, MoseiFusion
 from loss import SimCLR_loss, info_critic, info_critic_plus, prob_loss, decomposed_loss, get_train_accuracy, augmenter
+from pickle import dump
 import re
-import bitsandbytes as bnb
+import warnings
 
 def supervised_train(model, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality='image+audio'):
     # Create classifier
@@ -119,6 +121,7 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
         batch_stop = num_epochs * len(train_loader)
         num_epochs = 1
     num_epochs = int(num_epochs)
+    scaler = torch.amp.GradScaler()
     for e, epoch in enumerate(range(num_epochs)):
         epoch_losses = []
         epoch_train_accs = []
@@ -127,20 +130,19 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
                 break
             # Increment the batch counter
             cum_b += 1
-
-            with torch.autocast('cuda' if torch.cuda.is_available() else 'cpu'):
-                # Augment the batch
-                batch1, batch2 = augmenter(batch, modality, device)
+            # Augment the batch
+            batch1, batch2 = augmenter(batch, modality, device)
+            with torch.autocast('cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float16):
                 # Zero the gradients
                 optimizer.zero_grad()
                 # Forward pass
                 loss = loss_fun(model, batch1, batch2, temperature, device)
-                # print(torch.cuda.max_memory_allocated(), flush=True) #TODO: REMOVE
-
             # Backward pass and optimization
-            loss.backward()
-            optimizer.step()
-            print(torch.cuda.max_memory_allocated(), flush=True)
+            # loss.backward()
+            scaler.scale(loss).backward()
+            # optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
             # Log the loss
             epoch_losses.append(loss.item())
@@ -148,9 +150,9 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
             saver.log({'train_loss': loss.item()})
 
             # Calculate and log training accuracy
-            optimizer.zero_grad()
-            with torch.no_grad():
-                accs = get_train_accuracy(model, batch1, batch2, est, device)
+            with torch.autocast('cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float16):
+                with torch.no_grad():
+                    accs = get_train_accuracy(model, batch1, batch2, est, device)
             epoch_train_accs.append(accs)
             writer.add_scalar('Accuracy/train', accs['accuracy'].item(), cum_b)
             saver.log({'train_acc': accs['accuracy'].item()})
@@ -160,7 +162,7 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
                 print("NaNs encountered, stopping training", flush=True)
                 return model
         
-        if (epoch + 1) % 25 == 0:
+        if epoch % 10 == 0:
             # Print progress
             print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}', flush=True)
 
@@ -187,15 +189,19 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
                 break
     return model
             
-def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size, modality='image+audio', classifier_type='linear'):
+def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size, modality='image+audio', classifier_type='linear_10'):
     # Define the linear classifier
     # Find output size of network
-    if classifier_type == 'linear':
-        classifier = LinearClassifier(model.output_dim, 10).to(device)
+    if 'linear' in classifier_type:
+        _, num_classes = classifier_type.split('_')
+        num_classes = int(num_classes)
+        classifier = LinearClassifier(model.output_dim, num_classes).to(device)
+        fuse_opt = False
     elif classifier_type == 'seg':
-        classifier = SegClassifier(13).to(device)
+        classifier = SegClassifier(14).to(device)
+        fuse_opt = True
     learning_rate = 0.1 * batch_size / 256
-    optimizer = optim.SGD(classifier.parameters(), lr=learning_rate)
+    optimizer = optim.SGD(model.parameters(), lr=learning_rate)
     for param in model.parameters():
         param.requires_grad = False
 
@@ -220,17 +226,20 @@ def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size
             with torch.no_grad():
                 rep = model(batch)
 
-            with torch.autocast('cuda' if torch.cuda.is_available() else 'cpu'):
-                optimizer.zero_grad()
-                logits = classifier(rep)
-                loss = nn.CrossEntropyLoss()(logits, labels)
+            with warnings.catch_warnings(action="ignore", category=FutureWarning): # Suppress harmless FutureWarning from PyTorch
+                with torch.autocast('cuda' if torch.cuda.is_available() else 'cpu'):
+                    optimizer.zero_grad()
+                    logits = classifier(rep)
+                    loss = nn.CrossEntropyLoss()(logits, labels)
 
-            writer.add_scalar('Eval/train_loss', loss.item(), cum_b)
-            saver.log({'eval_train_loss': loss.item()})
             # Backward pass and optimization
             loss.backward()
             optimizer.step()
+            optimizer.zero_grad() # We zero gradients to save memory
             
+            writer.add_scalar('Eval/train_loss', loss.item(), cum_b)
+            saver.log({'eval_train_loss': loss.item()})
+
             # If we have NaNs, stop training
             if torch.isnan(loss):
                 print("NaNs encountered, stopping training", flush=True)
@@ -248,7 +257,7 @@ def test(model, classifier, data_loader, device, writer, saver, name='test', mod
     total_loss = 0.0
     total_correct = 0
     total_samples = 0
-
+    total_batches = 0
     with torch.no_grad():
         for modality0, modality1, labels in data_loader:
             modality0, modality1, labels = modality0.to(device), modality1.to(device), labels.to(device)
@@ -265,14 +274,14 @@ def test(model, classifier, data_loader, device, writer, saver, name='test', mod
             rep = model(batch)
             logits = classifier(rep)
             loss = nn.CrossEntropyLoss()(logits, labels)
-            total_loss += loss.item() * modality0.size(0)  # Multiply by batch size
+            total_loss += loss.item()
             # Compute the accuracy
             _, predicted = torch.max(logits.data, 1)
-            total_correct += (predicted == labels).sum().item()
-            total_samples += modality0.size(0)
+            total_correct += (predicted == labels).float().mean().item()
+            total_batches += 1
 
-    avg_loss = total_loss / total_samples
-    accuracy = total_correct / total_samples
+    avg_loss = total_loss / total_batches
+    accuracy = total_correct / total_batches
     writer.add_scalar('Eval/'+name+'_loss', avg_loss, 0)
     saver.log({'eval_'+name+'_loss': avg_loss})
     writer.add_scalar('Eval/'+name+'_accuracy', accuracy, 0)
@@ -315,7 +324,7 @@ def train(**kwargs):
 
     # Create save location using slune and tensorboard writer
     saver = slune.get_csv_saver(kwargs, root_dir='results')
-    path = os.path.dirname(saver.getset_current_path())
+    path, _ = os.path.splitext(saver.getset_current_path())
     writer = SummaryWriter(path)    
 
     # Check if CUDA is available and set the device accordingly
@@ -327,37 +336,49 @@ def train(**kwargs):
     if benchmark == "written_spoken_digits":
         train_loader, test_loader = digits_get_data_loaders(batch_size=batch_size)
         eval_train_loader = train_loader
-    elif benchmark == "nyu_v2":
-        train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size)
+    elif benchmark == "nyu_v2_13":
+        train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=13)
+    elif benchmark == "nyu_v2_40":
+        train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=40)
+    elif benchmark == "mosi":
+        train_loader, _, test_loader = mosi_get_data_loaders(batch_size=batch_size)
+        eval_train_loader = train_loader
+    elif benchmark == "mosei":
+        train_loader, _, test_loader = mosei_get_data_loaders(batch_size=batch_size)
+        eval_train_loader = train_loader
     else:
         raise ValueError("Invalid benchmark: {}".format(benchmark))
     
     if model == "FusionModel":
         model = FusionModel(output_dim=output_dim)
         modality = 'image+audio'
-        classifier_type = 'linear'
+        classifier_type = 'linear_10'
     elif model == "ImageOnly":
         model = ImageModel(output_dim=output_dim)
         modality = 'image'
-        classifier_type = 'linear'
+        classifier_type = 'linear_10'
     elif model == "AudioOnly":
         model = AudioModel(output_dim=output_dim)
         modality = 'audio'
-        classifier_type = 'linear'
+        classifier_type = 'linear_10'
     elif model == "ResNet101":
         model = ResNet101(output_dim=output_dim)
-        # layer_list = ['rgb_conv$', 'depth_conv$', 'layer1$', 'layer2$', 'layer3$', 'layer4$', 'fusion_mlp$', 'critic$'] 
-        # model = ckpt_monkey(model, re.compile('|'.join(layer_list)))
         model = MyDataParallel(model)
         modality = 'image+depth'
         classifier_type = 'seg'
     elif model == "ResNet50":
         model = ResNet50(output_dim=output_dim)
-        # layer_list = ['rgb_conv$', 'depth_conv$', 'layer1$', 'layer2$', 'layer3$', 'layer4$', 'fusion_mlp$', 'critic$']
-        # model = ckpt_monkey(model, re.compile('|'.join(layer_list)))
         model = MyDataParallel(model)
         modality = 'image+depth'
         classifier_type = 'seg'
+    elif model == "MosiFusion":
+        model = MosiFusion(output_dim=output_dim)
+        modality = 'image_ft+audio_ft+text'
+        classifier_type = 'linear_7'
+    elif model == "MoseiFusion":
+        model = MoseiFusion(output_dim=output_dim)
+        modality = 'image_ft+audio_ft+text'
+        classifier_type = 'linear_7'
     else:
         raise ValueError("Invalid model")
     model = model.to(device)
@@ -416,7 +437,7 @@ if __name__ == "__main__":
         'est': args.est,
         'model': args.model,
         'learning_rate': 1e-2,
-        'num_epochs': 200,
+        'num_epochs': 0.0003,
         'batch_size': 1,
         'patience': 10,
         'temperature': 1,

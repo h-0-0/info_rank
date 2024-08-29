@@ -2,21 +2,21 @@ import slune
 
 if  __name__ == "__main__":
     to_search = {
-        'benchmark': ['nyu_v2'],
+        'benchmark': ['nyu_v2_13', 'nyu_v2_40'],
         'model': ['ResNet50', 'ResNet101'],
-        'num_epochs': [2],
-        'batch_size': [8],
+        'num_epochs': [100],
+        'batch_size': [16],
         'patience': [30],
     }
     SimCLR = {
         'est': ['SimCLR'],
-        'learning_rate': [1e-4], #, 1e-2, 1e-3, 1e-4, 1e-6, 1e-8, 1e-10, 1e-12],
+        'learning_rate': [1e-2], #, 1e-3, 1e-4],
         'temperature': [10], #, 1, 0.1], 
         'output_dim': [2048],
     }
     info_critic = {
         'est': ['info_critic'],
-        'learning_rate': [1e-4], #, 1e-2, 1e-3, 1e-4, 1e-6, 1e-8, 1e-10, 1e-12],
+        'learning_rate': [1e-1, 1e-2, 1e-3, 1e-4, 1e-5],
         'temperature' : [1],
         'output_dim': [2048],
     }
