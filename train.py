@@ -205,7 +205,7 @@ def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size
         classifier = MyDataParallel(classifier)
         classifier = classifier.to(device)
     learning_rate = 0.1 * batch_size / 256
-    optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+    optimizer = optim.SGD(classifier.parameters(), lr=learning_rate)
     for param in model.parameters():
         param.requires_grad = False
 

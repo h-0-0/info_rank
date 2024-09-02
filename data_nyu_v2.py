@@ -8,6 +8,19 @@ from torchvision.datasets.utils import download_url
 import matplotlib.pyplot as plt
 from nyuv2 import NYUv2
 
+def set_tensorflow_not_use_gpu():
+    import tensorflow as tf
+    # Get the list of all available GPUs
+    gpus = tf.config.list_physical_devices('GPU')
+
+    if gpus:
+        try:
+            # Set no visible devices to prevent TensorFlow from using the GPU
+            tf.config.set_visible_devices([], 'GPU')
+        except RuntimeError as e:
+            # Visible devices must be set before GPUs have been initialized
+            print(e)
+
 rgb_transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -72,6 +85,7 @@ def download_nyu_v2():
     """
     Download the NYUv2 dataset if it is not already downloaded and return the train and test datasets.
     """
+    set_tensorflow_not_use_gpu() # Prevent TensorFlow from using the GPU
     train_set = tfds.load(name="nyu_depth_v2", split="train", as_supervised=False, data_dir='data', shuffle_files=True)
     test_set = tfds.load(name="nyu_depth_v2", split="validation", as_supervised=False, data_dir='data', shuffle_files=False)
 
