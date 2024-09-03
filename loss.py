@@ -69,7 +69,7 @@ def image_audio_aug(batch, device=None):
     return (image1, audio1), (image2, audio2)
 
 def augmenter(batch, modality, device):
-    batch = [b.to(device) for b in batch] if not torch.is_tensor(batch) else batch.to(device)
+    # batch = [b.to(device) for b in batch] if not torch.is_tensor(batch) else batch.to(device) #TODO: check
     if modality == 'image+audio':
         batch1, batch2 = image_audio_aug(batch[:2], device=device)
     elif modality == 'image':
@@ -78,9 +78,12 @@ def augmenter(batch, modality, device):
         batch1, batch2 = audio_aug(batch[1]).to(device), audio_aug(batch[1]).to(device)
     elif modality == 'image+depth':
         batch1, batch2 = [image_aug(batch[0], type='nyu-rgb').to(device), image_aug(batch[1], type='nyu-depth').to(device)], [image_aug(batch[0], type='nyu-rgb').to(device), image_aug(batch[1], type='nyu-depth').to(device)],
+    elif modality == 'image_ft+audio_ft+text':
+        batch1 = [audio_aug(batch[i]).to(device) for i in range(3)]
+        batch2 = [audio_aug(batch[i]).to(device) for i in range(3)]
     else:
         raise ValueError("Invalid aug")
-    batch = [b.to('cpu') for b in batch] if not torch.is_tensor(batch) else batch.to('cpu')
+    # batch = [b.to('cpu') for b in batch] if not torch.is_tensor(batch) else batch.to('cpu') #TODO: check
     return batch1, batch2
 
 def _info_critic_acc(scores, device):

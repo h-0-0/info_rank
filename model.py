@@ -293,15 +293,23 @@ class MosiFusion(nn.Module):
 
         self.output_dim = output_dim
 
-        self.image_encoder = nn.LSTM(input_size=35, hidden_size=256, num_layers=2, batch_first=True)
-        self.audio_encoder = nn.LSTM(input_size=74, hidden_size=256, num_layers=2, batch_first=True)
-        self.text_encoder = nn.LSTM(input_size=300, hidden_size=256, num_layers=2, batch_first=True)
+        # self.image_encoder = nn.LSTM(input_size=35, hidden_size=256, num_layers=2, batch_first=True)
+        # self.audio_encoder = nn.LSTM(input_size=74, hidden_size=256, num_layers=2, batch_first=True)
+        # self.text_encoder = nn.LSTM(input_size=300, hidden_size=256, num_layers=2, batch_first=True)
+
+        hidden_size = 64
+        self.image_encoder = nn.GRU(input_size=35, hidden_size=hidden_size, num_layers=2, batch_first=True)
+        self.image_proj =nn.Linear(hidden_size*50, hidden_size)
+        self.audio_encoder = nn.GRU(input_size=74, hidden_size=hidden_size, num_layers=2, batch_first=True)
+        self.audio_proj = nn.Linear(hidden_size*50, hidden_size)
+        self.text_encoder = nn.GRU(input_size=300, hidden_size=hidden_size, num_layers=2, batch_first=True)
+        self.text_proj = nn.Linear(hidden_size*50, hidden_size)
 
         self.fusion_mlp = nn.Sequential(
             nn.ReLU(),
-            nn.Linear(768, 256),
+            nn.Linear(hidden_size*3, hidden_size),
             nn.ReLU(),
-            nn.Linear(256, self.output_dim),
+            nn.Linear(hidden_size, self.output_dim),
         )
 
         self.critic = nn.Sequential(
@@ -310,9 +318,16 @@ class MosiFusion(nn.Module):
 
     def forward(self, batch):
         image, audio, text = batch
-        image_repr = self.image_encoder(image)
-        audio_repr = self.audio_encoder(audio)
-        text_repr = self.text_encoder(text)
+
+        image_repr, _ = self.image_encoder(image)
+        image_repr = self.image_proj(torch.flatten(image_repr, start_dim=1))
+
+        audio_repr, _ = self.audio_encoder(audio)
+        audio_repr = self.audio_proj(torch.flatten(audio_repr, start_dim=1))
+
+        text_repr, _ = self.text_encoder(text)
+        text_repr = self.text_proj(torch.flatten(text_repr, start_dim=1))
+
         fused_repr = torch.cat((image_repr, audio_repr, text_repr), dim=1)
         output = self.fusion_mlp(fused_repr)
         return output
@@ -327,7 +342,7 @@ class MoseiFusion(nn.Module):
     The output of each encoder is concatenated and passed through an MLP.
     """
     def __init__(self, output_dim=64):
-        super(MosiFusion, self).__init__()
+        super(MoseiFusion, self).__init__()
 
         self.output_dim = output_dim
 

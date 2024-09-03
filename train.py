@@ -445,7 +445,7 @@ if __name__ == "__main__":
         'model': args.model,
         'learning_rate': 1e-2,
         'num_epochs': 0.0003,
-        'batch_size': 1,
+        'batch_size': 5,
         'patience': 10,
         'temperature': 1,
         'output_dim': 2048,
