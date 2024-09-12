@@ -120,3 +120,166 @@ def get_optimizer(model, learning_rate, fuse_opt=False):
     else:
         opt = optim.SGD(model.parameters(), lr=learning_rate)
     return opt
+
+import psutil
+def log_memory(writer, step):
+    # Log CPU memory
+    cpu_memory_used = psutil.virtual_memory().used / (1024 * 1024)  # Convert to MB
+    writer.add_scalar('Memory/CPU_Used_MB', cpu_memory_used, step)
+
+    # Log GPU memory if available
+    if torch.cuda.is_available():
+        gpu_memory_allocated = torch.cuda.memory_allocated() / (1024 * 1024)  # Convert to MB
+        gpu_memory_reserved = torch.cuda.memory_reserved() / (1024 * 1024)  # Convert to MB
+        writer.add_scalar('Memory/GPU_Allocated_MB', gpu_memory_allocated, step)
+        writer.add_scalar('Memory/GPU_Reserved_MB', gpu_memory_reserved, step)
+
+def mapto7classes(labels):
+    """
+    Function to map the MOSI and MOSEI labels to 7 classes.
+    """
+    labels = torch.where(labels < -2.5, 0,
+             torch.where(labels < -1.5, 1,
+             torch.where(labels < -0.5, 2,
+             torch.where(labels < 0.5, 3,
+             torch.where(labels < 1.5, 4,
+             torch.where(labels < 2.5, 5, 6))))))
+    return labels
+
+def get_batch_labels(modality, batch, device):
+    if modality in ['image+audio', 'image', 'audio', 'image+depth']:
+        modality0, modality1, labels = batch
+        if modality in ['image+audio', 'image+depth']:
+            modality0, modality1, labels = modality0.to(device), modality1.to(device), labels.to(device)
+            batch = (modality0, modality1)
+        elif modality == 'image':
+            modality0, labels = modality0.to(device), labels.to(device)
+            batch = modality0
+        elif modality == 'audio':
+            modality1, labels = modality1.to(device), labels.to(device)
+            batch = modality1
+    elif modality == 'image_ft+audio_ft+text':
+        modality0, modality1, modality2, labels = batch
+        modality0, modality1, modality2, labels = modality0.to(device), modality1.to(device), modality2.to(device), labels.to(device)
+        # labels = mapto7classes(labels) TODO: Remove
+        # labels = labels.view(-1) #TODO: Remove
+        batch = (modality0, modality1, modality2)
+    else:
+        raise ValueError("Invalid modality")
+    return batch, labels
+
+import torchmetrics
+
+class CustomBinaryAccuracy(torchmetrics.Metric):
+    def __init__(self, threshold=0, dist_sync_on_step=False):
+        super().__init__(dist_sync_on_step=dist_sync_on_step)
+        self.threshold = threshold
+        self.add_state("correct", default=torch.tensor(0), dist_reduce_fx="sum")
+        self.add_state("total", default=torch.tensor(0), dist_reduce_fx="sum")
+
+    def update(self, preds: torch.Tensor, target: torch.Tensor):
+        # Convert scalar predictions to binary, using a soft threshold
+        preds_binary = (preds >= self.threshold).long()
+        target_binary = (target >= self.threshold).long()
+
+        # Calculate correct predictions
+        correct = torch.eq(preds_binary, target_binary).sum()
+        
+        self.correct += correct
+        self.total += target.numel()
+
+    def compute(self):
+        return self.correct.float() / self.total
+    
+class CustomStrictBinaryAccuracy(torchmetrics.Metric):
+    def __init__(self, threshold=0, dist_sync_on_step=False):
+        super().__init__(dist_sync_on_step=dist_sync_on_step)
+        self.threshold = threshold
+        self.add_state("correct", default=torch.tensor(0), dist_reduce_fx="sum")
+        self.add_state("total", default=torch.tensor(0), dist_reduce_fx="sum")
+
+    def update(self, preds: torch.Tensor, target: torch.Tensor):
+        # Get rid of targets that are exactly 0
+        mask = target != 0
+        preds = preds[mask]
+        target = target[mask]
+        # Convert scalar predictions to binary, here we use a strict threshold
+        preds_binary = (preds > self.threshold).long()
+        target_binary = (target > self.threshold).long()
+
+        # Calculate correct predictions
+        correct = torch.eq(preds_binary, target_binary).sum()
+        
+        self.correct += correct
+        self.total += target.numel()
+
+    def compute(self):
+        return self.correct.float() / self.total
+
+class CustomSevenAccuracy(torchmetrics.Metric):
+    def __init__(self, dist_sync_on_step=False):
+        super().__init__(dist_sync_on_step=dist_sync_on_step)
+        self.add_state("correct", default=torch.tensor(0), dist_reduce_fx="sum")
+        self.add_state("total", default=torch.tensor(0), dist_reduce_fx="sum")
+
+    def update(self, preds: torch.Tensor, target: torch.Tensor):
+        # Convert scalar predictions to class in [0, 6]
+        preds_7 = mapto7classes(preds)
+        target_7 = mapto7classes(target)
+
+        # Calculate correct predictions
+        correct = torch.eq(preds_7, target_7).sum()
+        
+        self.correct += correct
+        self.total += target.numel()
+
+    def compute(self):
+        return self.correct.float() / self.total
+
+from torchmetrics.functional import f1_score
+class CustomF1Score(torchmetrics.Metric):
+    def __init__(self, num_classes=7, average='macro', dist_sync_on_step=False):
+        super().__init__(dist_sync_on_step=dist_sync_on_step)
+        self.num_classes = num_classes
+        self.average = average
+        self.add_state("preds", default=[], dist_reduce_fx="cat")
+        self.add_state("target", default=[], dist_reduce_fx="cat")
+
+    def update(self, preds: torch.Tensor, target: torch.Tensor):
+        preds = mapto7classes(preds)
+        target = mapto7classes(target)
+        self.preds.append(preds)
+        self.target.append(target)
+
+    def compute(self):
+        preds = torch.cat(self.preds)
+        target = torch.cat(self.target)
+        return f1_score(preds, target, num_classes=self.num_classes, average=self.average, task='multiclass')
+    
+def get_torchmetrics(modality, num_classes, device):
+    metrics = {}
+    if modality in ['image', 'audio', 'image+audio']:
+        accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device)
+        
+        metrics['acc'] = accuracy
+    elif modality == 'image+depth':
+        accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device)
+        jaccard = torchmetrics.JaccardIndex(task="multiclass", num_classes=num_classes).to(device)
+
+        metrics['acc'] = accuracy
+        metrics['IoU'] = jaccard
+    elif modality == 'image_ft+audio_ft+text':
+        mse = torchmetrics.MeanSquaredError().to(device)
+        seven_accuracy = CustomSevenAccuracy().to(device)
+        binary_accuracy = CustomBinaryAccuracy().to(device)
+        strict_binary_accuracy = CustomStrictBinaryAccuracy().to(device)
+        f1 = CustomF1Score(num_classes=7).to(device)
+
+        metrics['mse'] = mse
+        metrics['7_acc'] = seven_accuracy
+        metrics['f1'] = f1
+        metrics['binary_acc'] = binary_accuracy
+        metrics['strict_binary_acc'] = strict_binary_accuracy
+    else:
+        raise ValueError("Invalid modality")
+    return metrics

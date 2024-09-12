@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=nyuv2                     # Job name
+#SBATCH --job-name=mosei                     # Job name
 #SBATCH --partition=gpu                    # Specify the partition/queue name
 #SBATCH --nodes=1                          # Number of nodes
 #SBATCH --ntasks=1                         # Number of tasks (cores)
 #SBATCH --cpus-per-task=1                  # Number of CPU cores per task
 #SBATCH --gres=gpu:1                       # Define number of GPUs per node, can also define type of GPU eg. gpu:tesla, gpu:k80, gpu:p100, gpu:v100
-#SBATCH --mem-per-gpu=16G                   # Define memory per GPU
-#SBATCH --time=120:00:00                    # Wall time (hh:mm:ss)
+#SBATCH --mem-per-gpu=5G                   # Define memory per GPU
+#SBATCH --time=004:00:00                    # Wall time (hh:mm:ss)
 #SBATCH --mail-user=jd18380@bristol.ac.uk  # Email address for job notifications
 #SBATCH --mail-type=FAIL                   # Email notifications (BEGIN, END, FAIL)
 #SBATCH --account=MATH026823

@@ -219,8 +219,10 @@ def download_seg(root: str, num_classes: int):
     if num_classes not in [13, 40]:
         raise ValueError("Invalid number of classes. Must be 13 or 40")
     if num_classes == 13:
-        train_url = "https://github.com/ankurhanda/nyuv2-meta-data/raw/master/train_labels_13/nyuv2_train_class13.tgz"
-        test_url = "https://github.com/ankurhanda/nyuv2-meta-data/raw/master/test_labels_13/nyuv2_test_class13.tgz"
+        # train_url = "https://github.com/ankurhanda/nyuv2-meta-data/raw/master/train_labels_13/nyuv2_train_class13.tgz" TODO
+        # test_url = "https://github.com/ankurhanda/nyuv2-meta-data/raw/master/test_labels_13/nyuv2_test_class13.tgz" TODO
+        train_url = "https://github.com/h-0-0/nyuv2-meta-data/raw/master/train_labels_13/nyuv2_train_class13.tgz"
+        test_url = "https://github.com/h-0-0/nyuv2-meta-data/raw/master/test_labels_13/nyuv2_test_class13.tgz"
     else:
         train_url = "https://github.com/h-0-0/nyuv2-meta-data/raw/master/train_labels_40/nyuv2_train_class40.tgz"
         test_url = "https://github.com/h-0-0/nyuv2-meta-data/raw/master/test_labels_40/nyuv2_test_class40.tgz"

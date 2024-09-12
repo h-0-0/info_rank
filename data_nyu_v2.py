@@ -29,6 +29,7 @@ depth_transform = transforms.Compose([
             lambda x: np.expand_dims(x, axis=-1),
             transforms.ToTensor(),
             transforms.ConvertImageDtype(torch.float16),
+            lambda x: torch.where(torch.isinf(x), torch.tensor(10.0), x), # Convert 'inf' to 10 
             transforms.Normalize(mean=[2.6738], std=[1.5146]),
         ])
 
@@ -170,7 +171,7 @@ def compute_norm():
     print(f'Depth mean: {depth_mean}, Depth std: {depth_std}')
 
 
-def viz(rgb_images, depth_images, labels=None):
+def viz(rgb_images, depth_images, num_classes, labels=None):
     n_images = len(rgb_images)
     if labels is None:
         n_rows = 2  # 1 row for RGB, 1 row for depth
@@ -204,7 +205,7 @@ def viz(rgb_images, depth_images, labels=None):
         # Plot segmentation masks (labels) if provided
         if labels is not None:
             ax_seg = axes[2, i % n_cols]
-            ax_seg.imshow(labels[i].permute(1, 2, 0), cmap='gray')
+            ax_seg.imshow(labels[i], cmap='gray')
             ax_seg.axis('off')
             ax_seg.set_title(f'Segmentation Mask {i + 1}')
 
@@ -222,13 +223,21 @@ def viz(rgb_images, depth_images, labels=None):
     if labels is None:
         plt.savefig('viz/nyu_v2/unsupervised.png')
     else:
-        plt.savefig('viz/nyu_v2/supervised.png')
+        plt.savefig(f'viz/nyu_v2/{num_classes}_classes_supervised.png')
 
 if __name__ == "__main__":
-    train_loader, test_loader, train_supervised_loader, test_supervised_loader = nyu_v2_get_data_loaders(4)
+    num_classes = 13
+    train_loader, test_loader, train_supervised_loader, test_supervised_loader = nyu_v2_get_data_loaders(4, num_classes)
     # Get the first batch of images and labels from the train loader and visualize them
     rgb_images, depth_images = next(iter(train_loader))
-    viz(rgb_images, depth_images)
+    viz(rgb_images, depth_images, num_classes)
 
     rgb_images, depth_images, labels = next(iter(train_supervised_loader))
-    viz(rgb_images, depth_images, labels=labels)
+    # print max and min values for depth images
+    viz(rgb_images, depth_images, num_classes, labels=labels)
+
+    num_classes = 40
+    train_loader, test_loader, train_supervised_loader, test_supervised_loader = nyu_v2_get_data_loaders(4, num_classes)
+    # Get the first batch of images and labels from the train loader and visualize them
+    rgb_images, depth_images, labels = next(iter(train_supervised_loader))    
+    viz(rgb_images, depth_images, num_classes, labels=labels)

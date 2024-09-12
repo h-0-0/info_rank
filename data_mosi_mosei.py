@@ -2,6 +2,8 @@ import subprocess
 import gdown
 import os
 import sys
+from torch.utils.data import DataLoader
+import torch
 
 def _get_MultiBench():
     if not os.path.exists('MultiBench'):
@@ -39,7 +41,8 @@ def get_mosi(batch_size=32, train_shuffle=True):
         max_seq_len=50,
         batch_size=batch_size,
         train_shuffle=train_shuffle,
-        z_norm=True,
+        z_norm=False,
+        num_workers=1
         )
     return train_loader, valid_loader, test_loader
 
@@ -55,7 +58,8 @@ def get_mosei(batch_size=32, train_shuffle=True):
         max_seq_len=50,
         batch_size=batch_size,
         train_shuffle=train_shuffle,
-        z_norm=True,
+        z_norm=False,
+        num_workers=1
         )
     return train_loader, valid_loader, test_loader
 
@@ -86,25 +90,34 @@ def viz(mosi_or_mosei, batch):
     fig, axs = plt.subplots(n_batch, 1)
     fig.tight_layout()
     for i in range(n_batch):
-        axs[i].imshow(vision[i].T, aspect='auto')
+        cax = axs[i].imshow(vision[i].T, aspect='auto')
         axs[i].set_title(f"Vision {i}")
+        fig.colorbar(cax, ax=axs[i])
     plt.savefig(f"viz/{mosi_or_mosei}/vision.png")
 
     # Now let's visualize the audio features
     fig, axs = plt.subplots(n_batch, 1)
     fig.tight_layout()
     for i in range(n_batch):
-        axs[i].imshow(audio[i].T, aspect='auto')
+        cax = axs[i].imshow(audio[i].T, aspect='auto')
         axs[i].set_title(f"Audio {i}")
+        fig.colorbar(cax, ax=axs[i])
     plt.savefig(f"viz/{mosi_or_mosei}/audio.png")
 
     # Now let's visualize the text features
     fig, axs = plt.subplots(n_batch, 1)
     fig.tight_layout()
     for i in range(n_batch):
-        axs[i].imshow(text[i].T, aspect='auto')
+        cax = axs[i].imshow(text[i].T, aspect='auto')
         axs[i].set_title(f"Text {i}")
+        fig.colorbar(cax, ax=axs[i])
     plt.savefig(f"viz/{mosi_or_mosei}/text.png")
+
+    # Now let's visualize the labels as a histogram, bins are from -3 to 3 (7 classes)
+    plt.hist(label, bins=np.arange(-3.5, 4.5, 1))
+    plt.title("Labels")
+    plt.savefig(f"viz/{mosi_or_mosei}/labels.png")
+
 
 def mosi_get_data_loaders(batch_size):
     """

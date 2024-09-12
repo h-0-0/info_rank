@@ -8,14 +8,11 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 from tensorboardX import SummaryWriter
-from utils import MyDataParallel
+from utils import MyDataParallel, log_memory, get_batch_labels, get_torchmetrics
 import slune
 import os
 from model import FusionModel, LinearClassifier, ImageModel, AudioModel, ResNet101, SegClassifier, ResNet50, MosiFusion, MoseiFusion
 from loss import SimCLR_loss, info_critic, info_critic_plus, prob_loss, decomposed_loss, get_train_accuracy, augmenter
-from pickle import dump
-import re
-import warnings
 
 def supervised_train(model, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality='image+audio'):
     # Create classifier
@@ -144,6 +141,9 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
             scaler.step(optimizer)
             scaler.update()
 
+            # Log memory usage 
+            log_memory(writer, cum_b)
+
             # Log the loss
             epoch_losses.append(loss.item())
             writer.add_scalar('Loss/train', loss.item(), cum_b)
@@ -198,12 +198,19 @@ def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size
         classifier = LinearClassifier(model.output_dim, num_classes)
         classifier = MyDataParallel(classifier)
         classifier = classifier.to(device)
+        criterion = nn.CrossEntropyLoss()
     elif 'seg' in classifier_type:
         _, num_classes = classifier_type.split('_')
         num_classes = int(num_classes)
         classifier = SegClassifier(num_classes)
         classifier = MyDataParallel(classifier)
         classifier = classifier.to(device)
+        criterion = nn.CrossEntropyLoss()
+    elif classifier_type == 'regr':
+        classifier = LinearClassifier(model.output_dim, 1)
+        classifier = MyDataParallel(classifier)
+        classifier = classifier.to(device)
+        criterion = nn.MSELoss()
     learning_rate = 0.1 * batch_size / 256
     optimizer = optim.SGD(classifier.parameters(), lr=learning_rate)
     for param in model.parameters():
@@ -212,29 +219,22 @@ def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size
     # Train the linear classifier
     cum_b = -1
     num_epochs = 50
+    patience = 50 # For early stopping
+    best_loss = float('inf') # For early stopping
+    patience_counter = 0 # For early stopping
     scaler = torch.amp.GradScaler()
     for epoch in range(num_epochs):
-        for b, (modality0, modality1, labels) in enumerate(train_loader):
+        epoch_losses = []
+        for b, batch in enumerate(train_loader):
             cum_b += 1
-            modality0, modality1, labels = modality0.to(device), modality1.to(device), labels.to(device)
-            if modality == 'image+audio':
-                batch = (modality0, modality1)
-            elif modality == 'image':
-                batch = modality0
-            elif modality == 'audio':
-                batch = modality1
-            elif modality == 'image+depth':
-                batch = (modality0, modality1)
-            else:
-                raise ValueError("Invalid modality")
-            
+            batch, labels = get_batch_labels(modality, batch, device)
             with torch.no_grad():
                 rep = model(batch)
-
+    
             with torch.autocast('cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float16):
                 optimizer.zero_grad()
                 logits = classifier(rep)
-                loss = nn.CrossEntropyLoss()(logits, labels)
+                loss = criterion(logits, labels)
 
             # Backward pass and optimization
             # loss.backward()
@@ -243,7 +243,8 @@ def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad() # We zero gradients to save memory
-            
+
+            epoch_losses.append(loss.item())
             writer.add_scalar('Eval/train_loss', loss.item(), cum_b)
             saver.log({'eval_train_loss': loss.item()})
 
@@ -256,44 +257,60 @@ def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size
         # Print progress
         if (epoch + 1) % 10 == 0:
             print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}', flush=True)
+
+        # Early stopping
+        avg_loss = np.mean(epoch_losses)
+        if patience is None:
+            pass
+        elif avg_loss < best_loss:
+            best_loss = avg_loss
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print("Early stopping at epoch:"+str(epoch+1), flush=True)
+                break
     return model, classifier
 
 def test(model, classifier, data_loader, device, writer, saver, name='test', modality='image+audio'):
     # Test the classifier
     model.eval()  # Set the model to evaluation mode
     total_loss = 0.0
-    total_correct = 0
     total_samples = 0
     total_batches = 0
+    num_classes = classifier.num_classes
+    metrics = get_torchmetrics(modality, num_classes, device)
+    if modality == 'image_ft+audio_ft+text':
+        criterion = nn.MSELoss()
+    else:
+        criterion = nn.CrossEntropyLoss()
     with torch.no_grad():
-        for modality0, modality1, labels in data_loader:
-            modality0, modality1, labels = modality0.to(device), modality1.to(device), labels.to(device)
-            if modality == 'image+audio':
-                batch = (modality0, modality1)
-            elif modality == 'image':
-                batch = modality0
-            elif modality == 'audio':
-                batch = modality1
-            elif modality == 'image+depth':
-                batch = (modality0, modality1)
-            else:
-                raise ValueError("Invalid modality")
+        for batch in data_loader:
+            batch, labels = get_batch_labels(modality, batch, device)
             rep = model(batch)
             logits = classifier(rep)
-            loss = nn.CrossEntropyLoss()(logits, labels)
+
+            loss = criterion(logits, labels)
             total_loss += loss.item()
-            # Compute the accuracy
-            _, predicted = torch.max(logits.data, 1)
-            total_correct += (predicted == labels).float().mean().item()
             total_batches += 1
+            total_samples += len(labels)
+            # Compute metrics 
+            _, predicted = torch.max(logits.data, 1)
+            if len(predicted.shape) ==1:
+                predicted = predicted.unsqueeze(1)
+            for metric in metrics.values():
+                metric(predicted, labels)
 
     avg_loss = total_loss / total_batches
-    accuracy = total_correct / total_batches
     writer.add_scalar('Eval/'+name+'_loss', avg_loss, 0)
     saver.log({'eval_'+name+'_loss': avg_loss})
-    writer.add_scalar('Eval/'+name+'_accuracy', accuracy, 0)
-    saver.log({'eval_'+name+'_accuracy': accuracy})
-    print(f'Accuracy of the network on the {total_samples} images: {accuracy:.4f}', flush=True)
+    
+    for key, metric in metrics.items():
+        metric = metric.compute()
+        writer.add_scalar('Eval/'+name+'_'+key, metric, 0)
+        saver.log({'eval_'+name+'_'+key: metric})
+        print(f'{key} of the network on the {total_samples} images: {metric:.4f}', flush=True)
+        metrics[key].reset()
 
 def train(**kwargs):
     """
@@ -372,20 +389,20 @@ def train(**kwargs):
         model = ResNet101(output_dim=output_dim)
         model = MyDataParallel(model)
         modality = 'image+depth'
-        classifier_type = 'seg_13' if benchmark == "nyu_v2_13" else 'seg_40'
+        classifier_type = 'seg_14' if benchmark == "nyu_v2_13" else 'seg_41'
     elif model == "ResNet50":
         model = ResNet50(output_dim=output_dim)
         model = MyDataParallel(model)
         modality = 'image+depth'
-        classifier_type = 'seg_13' if benchmark == "nyu_v2_13" else 'seg_40'
+        classifier_type = 'seg_14' if benchmark == "nyu_v2_13" else 'seg_41'
     elif model == "MosiFusion":
         model = MosiFusion(output_dim=output_dim)
         modality = 'image_ft+audio_ft+text'
-        classifier_type = 'linear_7'
+        classifier_type = 'regr'
     elif model == "MoseiFusion":
         model = MoseiFusion(output_dim=output_dim)
         modality = 'image_ft+audio_ft+text'
-        classifier_type = 'linear_7'
+        classifier_type = 'regr'
     else:
         raise ValueError("Invalid model")
     model = model.to(device)
@@ -443,12 +460,12 @@ if __name__ == "__main__":
         'benchmark': args.benchmark,
         'est': args.est,
         'model': args.model,
-        'learning_rate': 1e-2,
+        'learning_rate': 1e-8, 
         'num_epochs': 0.0003,
-        'batch_size': 5,
+        'batch_size': 16, #16
         'patience': 10,
         'temperature': 1,
-        'output_dim': 2048,
+        'output_dim': 128, #2028
     }
     # Train the model
     model = train(**config)
