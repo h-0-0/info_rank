@@ -89,9 +89,8 @@ def download_AudioMNIST(viz = True, cleanup=True):
     if not os.path.exists(os.path.join('data','AudioMNIST')):
         os.system('git clone https://github.com/soerenab/AudioMNIST.git '+ os.path.join('data','AudioMNIST'))
     # Check directory for viz exists
-    if viz and not os.path.exists(os.path.join('viz','AudioMNIST')):
-        os.mkdir('viz')
-        os.mkdir(os.path.join('viz','AudioMNIST'))
+    if viz and not os.path.exists(os.path.join('viz','written_spoken_digits','AudioMNIST')):
+        os.makedirs(os.path.join('viz', 'written_spoken_digits', 'AudioMNIST'))
     # Create numpy array of the data
     audio_data = []
     label_data = []
@@ -109,10 +108,10 @@ def download_AudioMNIST(viz = True, cleanup=True):
                     plt.figure(figsize=(10, 4))
                     plt.plot(audio)
                     plt.title(f"Digit {digit} - Speaker {speaker} - Index {index}")
-                    plt.savefig(os.path.join("viz", "AudioMNIST", f"digit_{digit}_speaker_{speaker}_{index}.png"))
+                    plt.savefig(os.path.join("viz", 'written_spoken_digits', "AudioMNIST", f"digit_{digit}_speaker_{speaker}_{index}.png"))
                     plt.close()
                 
-                    os.system(f"cp {file} {os.path.join('viz', 'AudioMNIST', f'digit_{digit}_speaker_{speaker}_{index}.wav')}")
+                    os.system(f"cp {file} {os.path.join('viz','written_spoken_digits', 'AudioMNIST', f'digit_{digit}_speaker_{speaker}_{index}.wav')}")
                 n_mfcc = 40
                 mfcc = librosa.feature.mfcc(y=audio,sr=sample_rate, n_mfcc=n_mfcc)
                 mfcc = padding(mfcc, n_mfcc, 44)
@@ -122,7 +121,7 @@ def download_AudioMNIST(viz = True, cleanup=True):
                     plt.imshow(mfcc, aspect='auto', origin='lower')
                     plt.colorbar()
                     plt.title(f"Digit {digit} - Speaker {speaker} - Index {index}")
-                    plt.savefig(os.path.join("viz", "AudioMNIST", f"digit_{digit}_speaker_{speaker}_{index}_mfcc.png"))
+                    plt.savefig(os.path.join("viz", 'written_spoken_digits', "AudioMNIST", f"digit_{digit}_speaker_{speaker}_{index}_mfcc.png"))
                     plt.close()
 
                 audio_data.append(mfcc)
@@ -233,7 +232,7 @@ if __name__ == '__main__':
         axes[0, i].set_title(f"Label: {label_batch[i]}")
         axes[1, i].imshow(audio_batch[i].squeeze(), cmap='gray')
     if not os.path.exists('viz/written_spoken_digits'):
-        os.mkdir('viz/written_spoken_digits')
+        os.makedirs('viz/written_spoken_digits')
     plt.savefig('viz/written_spoken_digits/batch.png')
     # Plot bar chart of number of samples in each class
     # plt.figure()

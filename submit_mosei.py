@@ -7,23 +7,25 @@ if  __name__ == "__main__":
         'num_epochs': [100],
         'batch_size': [16],
         'patience': [15],
+        'optimizer': ['SGD'],
+        'grad_clip': ['None'],
     }
     SimCLR = {
         'est': ['SimCLR'],
         'learning_rate': [1e-1, 1e-2, 1e-3, 1e-4, 1e-6, 1e-8, 1e-10, 1e-12],
         'temperature': [10, 1, 0.1], 
-        'output_dim': [64, 128, 256],
+        'output_dim': [64, 128, 256, 512],
     }
     info_critic = {
         'est': ['info_critic'],
         'learning_rate': [1e-1, 1e-2, 1e-3, 1e-4, 1e-6, 1e-8, 1e-10, 1e-12],
         'temperature' : [1],
-        'output_dim': [64, 128, 256],
+        'output_dim': [64, 128, 256, 512],
     }
 
     # Join dictionary
-    # to_search.update(SimCLR) 
-    to_search.update(info_critic)
+    to_search.update(SimCLR) 
+    # to_search.update(info_critic)
 
     grid_info_rank = slune.searchers.SearcherGrid(to_search)
 

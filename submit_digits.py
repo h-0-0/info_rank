@@ -7,6 +7,8 @@ if  __name__ == "__main__":
         'num_epochs': [200],
         'batch_size': [128],
         'patience': [15],
+        'optimizer': ['SGD'],
+        'grad_clip': ['None'],
     }
     SimCLR = {
         'est': ['SimCLR'],

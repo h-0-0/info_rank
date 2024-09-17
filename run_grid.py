@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from train import train
 import numpy as np
 import torch
+from typing import Optional
 
 def none_or_int(value):
     if value is None:
@@ -14,6 +15,17 @@ def none_or_int(value):
         return value
     else:
         raise argparse.ArgumentTypeError(f"{value} is not an integer")
+    
+def none_or_float(value):
+    if value is None:
+        return None
+    elif value == 'None':
+        return None
+    try:
+        f = float(value)
+        return f
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value} is not a float")
 
 if  __name__ == "__main__":
     # Parse input from command line
@@ -27,6 +39,8 @@ if  __name__ == "__main__":
     parser.add_argument('--patience', type=int, help='Patience for early stopping', default=10)
     parser.add_argument('--temperature', type=float, help='Temperature for NCE', default=1.0)
     parser.add_argument('--output_dim', type=int, help='Output dimension of the model', default=64)
+    parser.add_argument('--optimizer', type=str, help='Optimizer to use', default="SGD")
+    parser.add_argument('--grad_clip', type=none_or_float, help='Gradient clipping value', default=None)
     args = parser.parse_args()
 
     config = {
@@ -39,6 +53,8 @@ if  __name__ == "__main__":
         'patience': [args.patience],
         'temperature': [args.temperature],
         'learning_rate': [args.learning_rate],
+        'optimizer': [args.optimizer],
+        'grad_clip': [args.grad_clip],
     }
     print("Searching Over: ", config, flush=True)
     if args.benchmark == 'written_spoken_digits':

@@ -406,6 +406,27 @@ class MoseiFusion(nn.Module):
 # Before MLP projection could add avg pooling
 # Change activation functions from Relu to Tanh
 
+class Regression(nn.Module):
+    """ TODO """
+    def __init__(self, input_dim):
+        super().__init__()
+        self.input_dim = input_dim
+        self.output_dim = 1
+        self.num_classes = 1
+        
+        # Define MLP
+        # self.layer = nn.Sequential(
+        #     nn.Linear(self.input_dim, 128),
+        #     nn.ReLU(),
+        #     nn.Linear(128, 64),
+        #     nn.ReLU(),
+        #     nn.Linear(64, self.output_dim)
+        # )
+        self.layer = nn.Linear(self.input_dim, self.output_dim)
+        
+    def forward(self, x):
+        return self.layer(x)
+
 if __name__ == '__main__':
     print(MNIST_Image_CNN())
     print(MNIST_Audio_CNN())
