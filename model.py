@@ -145,7 +145,7 @@ class ResNet101(nn.Module):
     def __init__(self, output_dim=64):
         super(ResNet101, self).__init__()
         self.resnet = models.resnet101(weights=None)
-        
+        self.encode_batch = True # When True loss function can be applied to encoded modalities
         if output_dim != 2048:
             raise ValueError("Currently output dimension must be 2048 for ResNetSegmentation")
         self.output_dim = output_dim
@@ -185,6 +185,23 @@ class ResNet101(nn.Module):
         x = torch.cat((x_rgb, x_depth), dim=1)
         x = self.fusion_mlp(x)
         return x
+    
+    def encode_modalities(self, x):
+        x_rgb, x_depth = x
+  
+        x_rgb = self.rgb_conv(x_rgb)
+        x_rgb = self.resnet(x_rgb)
+
+        x_depth = self.depth_conv(x_depth)
+        x_depth = self.resnet(x_depth)
+
+        return [x_rgb, x_depth]
+    
+    def fuse(self, x):
+        x_rgb, x_depth = x 
+        x = torch.cat((x_rgb, x_depth), dim=1)
+        x = self.fusion_mlp(x)
+        return x
 
     def score(self, u, v):
         concat = torch.cat((u, v), dim=1)
@@ -194,7 +211,7 @@ class ResNet50(nn.Module):
     def __init__(self, output_dim=64):
         super(ResNet50, self).__init__()
         self.resnet = models.resnet50(weights=None)
-        
+        self.encode_batch = True # When True loss function can be applied to encoded modalities
         if output_dim != 2048:
             raise ValueError("Currently output dimension must be 2048 for ResNetSegmentation")
         self.output_dim = output_dim
@@ -229,6 +246,23 @@ class ResNet50(nn.Module):
         # x_depth = torch.utils.checkpoint.checkpoint(self.depth_conv, x_depth, use_reentrant=False)
         # x_depth = torch.utils.checkpoint.checkpoint(self.resnet, x_depth, use_reentrant=False)
         
+        x = torch.cat((x_rgb, x_depth), dim=1)
+        x = self.fusion_mlp(x)
+        return x
+    
+    def encode_modalities(self, x):
+        x_rgb, x_depth = x
+  
+        x_rgb = self.rgb_conv(x_rgb)
+        x_rgb = self.resnet(x_rgb)
+
+        x_depth = self.depth_conv(x_depth)
+        x_depth = self.resnet(x_depth)
+
+        return [x_rgb, x_depth]
+    
+    def fuse(self, x):
+        x_rgb, x_depth = x 
         x = torch.cat((x_rgb, x_depth), dim=1)
         x = self.fusion_mlp(x)
         return x
@@ -298,16 +332,39 @@ class MosiFusion(nn.Module):
         # self.audio_encoder = nn.LSTM(input_size=74, hidden_size=256, num_layers=2, batch_first=True)
         # self.text_encoder = nn.LSTM(input_size=300, hidden_size=256, num_layers=2, batch_first=True)
 
-        hidden_size = 256
+        hidden_size = 512
 
         self.image_encoder = nn.GRU(input_size=35, hidden_size=hidden_size, num_layers=2, batch_first=True, bidirectional=True)
-        self.image_proj =nn.Linear(hidden_size*50*2, hidden_size)
+        self.image_norm = nn.LayerNorm(hidden_size*2)
+        self.image_proj = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(hidden_size*50*2, hidden_size)
+        )
 
         self.audio_encoder = nn.GRU(input_size=74, hidden_size=hidden_size, num_layers=2, batch_first=True, bidirectional=True)
-        self.audio_proj = nn.Linear(hidden_size*50*2, hidden_size)
+        self.audio_norm = nn.LayerNorm(hidden_size*2)
+        self.audio_proj = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(hidden_size*50*2, hidden_size)
+        )
 
         self.text_encoder = nn.GRU(input_size=300, hidden_size=hidden_size, num_layers=2, batch_first=True, bidirectional=True)
-        self.text_proj = nn.Linear(hidden_size*50*2, hidden_size)
+        self.text_norm = nn.LayerNorm(hidden_size*2)
+        self.text_proj = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(hidden_size*50*2, hidden_size)
+        )
+
+        # self.fusion_mlp = nn.Sequential(
+        #     nn.BatchNorm1d(hidden_size*3),
+        #     nn.ReLU(),
+        #     nn.Dropout(0.5),
+        #     nn.Linear(hidden_size*3, hidden_size),
+        #     nn.BatchNorm1d(hidden_size),
+        #     nn.ReLU(),
+        #     nn.Dropout(0.5),
+        #     nn.Linear(hidden_size, self.output_dim)
+        # )
 
         self.fusion_mlp = nn.Sequential(
             nn.ReLU(),
@@ -315,6 +372,30 @@ class MosiFusion(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_size, self.output_dim),
         )
+
+        # self.fusion_mlp = nn.Sequential(
+        #     nn.BatchNorm1d(hidden_size*3),
+        #     nn.ReLU(),
+        #     nn.Dropout(0.5),
+        #     nn.Linear(hidden_size*3, hidden_size*2),
+        #     nn.BatchNorm1d(hidden_size*2),
+        #     nn.ReLU(),
+        #     nn.Dropout(0.5),
+        #     nn.Linear(hidden_size*2, hidden_size),
+        #     nn.BatchNorm1d(hidden_size),
+        #     nn.ReLU(),
+        #     nn.Dropout(0.5),
+        #     nn.Linear(hidden_size, self.output_dim)
+        # )
+
+        # self.fusion_mlp = nn.Sequential(
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_size*3, hidden_size*2),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_size*2, hidden_size),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_size, self.output_dim),
+        # )
 
         self.critic = nn.Sequential(
             nn.Linear(self.output_dim*2, 8),
@@ -324,12 +405,15 @@ class MosiFusion(nn.Module):
         image, audio, text = batch
 
         image_repr, _ = self.image_encoder(image)
+        image_repr = self.image_norm(image_repr)
         image_repr = self.image_proj(torch.flatten(image_repr, start_dim=1))
 
         audio_repr, _ = self.audio_encoder(audio)
+        audio_repr = self.audio_norm(audio_repr)
         audio_repr = self.audio_proj(torch.flatten(audio_repr, start_dim=1))
 
         text_repr, _ = self.text_encoder(text)
+        text_repr = self.text_norm(text_repr)
         text_repr = self.text_proj(torch.flatten(text_repr, start_dim=1))
 
         fused_repr = torch.cat((image_repr, audio_repr, text_repr), dim=1)
@@ -357,19 +441,36 @@ class MoseiFusion(nn.Module):
         hidden_size = 256
 
         self.image_encoder = nn.GRU(input_size=713, hidden_size=hidden_size, num_layers=2, batch_first=True, bidirectional=True)
-        self.image_proj =nn.Linear(hidden_size*50*2, hidden_size)
+        self.image_norm = nn.LayerNorm(hidden_size*2)
+        self.image_proj = nn.Sequential(
+            nn.Linear(hidden_size*50*2, hidden_size),
+            nn.BatchNorm1d(hidden_size)
+        )
 
         self.audio_encoder = nn.GRU(input_size=74, hidden_size=hidden_size, num_layers=2, batch_first=True, bidirectional=True)
-        self.audio_proj = nn.Linear(hidden_size*50*2, hidden_size)
+        self.audio_norm = nn.LayerNorm(hidden_size*2)
+        self.audio_proj = nn.Sequential(
+            nn.Linear(hidden_size*50*2, hidden_size),
+            nn.BatchNorm1d(hidden_size)
+        )
 
         self.text_encoder = nn.GRU(input_size=300, hidden_size=hidden_size, num_layers=2, batch_first=True, bidirectional=True)
-        self.text_proj = nn.Linear(hidden_size*50*2, hidden_size)
+        self.text_norm = nn.LayerNorm(hidden_size*2)
+        self.text_proj = nn.Sequential(
+            nn.Linear(hidden_size*50*2, hidden_size),
+            nn.BatchNorm1d(hidden_size)
+        )
 
         self.fusion_mlp = nn.Sequential(
+            nn.BatchNorm1d(hidden_size*3),
             nn.ReLU(),
+            nn.Dropout(0.5),
             nn.Linear(hidden_size*3, hidden_size),
+            nn.BatchNorm1d(hidden_size),
             nn.ReLU(),
+            nn.Dropout(0.5),
             nn.Linear(hidden_size, self.output_dim),
+            nn.BatchNorm1d(self.output_dim)
         )
 
         self.critic = nn.Sequential(
@@ -378,13 +479,20 @@ class MoseiFusion(nn.Module):
 
     def forward(self, batch):
         image, audio, text = batch
+        # Swap axes 1 and 2
+        # image = image.permute(0, 2, 1) #TODO Remove
+        # image_repr = self.image_downsample(image)#TODO Remove
+        # image_repr = image_repr.permute(0, 2, 1) #TODO Remove
         image_repr, _ = self.image_encoder(image)
+        image_repr = self.image_norm(image_repr)
         image_repr = self.image_proj(torch.flatten(image_repr, start_dim=1))
-
+    
         audio_repr, _ = self.audio_encoder(audio)
+        audio_repr = self.audio_norm(audio_repr)
         audio_repr = self.audio_proj(torch.flatten(audio_repr, start_dim=1))
 
         text_repr, _ = self.text_encoder(text)
+        text_repr = self.text_norm(text_repr)
         text_repr = self.text_proj(torch.flatten(text_repr, start_dim=1))
 
         fused_repr = torch.cat((image_repr, audio_repr, text_repr), dim=1)
@@ -415,14 +523,14 @@ class Regression(nn.Module):
         self.num_classes = 1
         
         # Define MLP
-        # self.layer = nn.Sequential(
-        #     nn.Linear(self.input_dim, 128),
-        #     nn.ReLU(),
-        #     nn.Linear(128, 64),
-        #     nn.ReLU(),
-        #     nn.Linear(64, self.output_dim)
-        # )
-        self.layer = nn.Linear(self.input_dim, self.output_dim)
+        self.layer = nn.Sequential(
+            nn.Linear(self.input_dim, self.input_dim//2),
+            nn.ReLU(),
+            nn.Linear(self.input_dim//2, self.input_dim//4),
+            nn.ReLU(),
+            nn.Linear(self.input_dim//4, self.output_dim)
+        )
+        # self.layer = nn.Linear(self.input_dim, self.output_dim)
         
     def forward(self, x):
         return self.layer(x)

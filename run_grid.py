@@ -11,9 +11,12 @@ from typing import Optional
 def none_or_int(value):
     if value is None:
         return None
-    elif isinstance(value, int):
-        return value
-    else:
+    elif value == 'None':   
+        return None
+    try:
+        i = int(value)
+        return i
+    except ValueError:
         raise argparse.ArgumentTypeError(f"{value} is not an integer")
     
 def none_or_float(value):
@@ -40,7 +43,9 @@ if  __name__ == "__main__":
     parser.add_argument('--temperature', type=float, help='Temperature for NCE', default=1.0)
     parser.add_argument('--output_dim', type=int, help='Output dimension of the model', default=64)
     parser.add_argument('--optimizer', type=str, help='Optimizer to use', default="SGD")
-    parser.add_argument('--grad_clip', type=none_or_float, help='Gradient clipping value', default=None)
+    parser.add_argument('--eval_lr', type=none_or_float, help='Learning rate for evaluation training, if None then uses 0.1 * batch_size / 256', default=None)
+    parser.add_argument('--eval_num_epochs', type=none_or_int, help='Number of epochs to train for evaluation training, if None then uses 50', default=None)
+    parser.add_argument('--eval_patience', type=none_or_int, help='Patience for early stopping during evaluation training, if None then no early stopping', default=None)
     args = parser.parse_args()
 
     config = {
@@ -54,8 +59,14 @@ if  __name__ == "__main__":
         'temperature': [args.temperature],
         'learning_rate': [args.learning_rate],
         'optimizer': [args.optimizer],
-        'grad_clip': [args.grad_clip],
     }
+    if args.eval_lr is not None:
+        config['eval_lr'] = [args.eval_lr]
+    if args.eval_num_epochs is not None:
+        config['eval_num_epochs'] = [args.eval_num_epochs]
+    if args.eval_patience is not None:
+        config['eval_patience'] = [args.eval_patience]
+
     print("Searching Over: ", config, flush=True)
     if args.benchmark == 'written_spoken_digits':
         grid = slune.searchers.SearcherGrid(config, runs=10)

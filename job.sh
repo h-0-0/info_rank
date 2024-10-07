@@ -1,13 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=data                  # Job name
-#SBATCH --partition=cpu                 # Specify the partition/queue name
+#SBATCH --job-name=nyuv2                     # Job name
+#SBATCH --partition=magma                    # Specify the partition/queue name
 #SBATCH --nodes=1                          # Number of nodes
 #SBATCH --ntasks=1                         # Number of tasks (cores)
-#SBATCH --cpus-per-task=1                  # Number of CPU cores per task
-#SBATCH --mem=35G                   # Define memory per GPU
-#SBATCH --time=20:00:00                    # Wall time (hh:mm:ss)
+#SBATCH --cpus-per-task=8                # Number of CPU cores per task
+#SBATCH --gres=gpu:1                       # Define number of GPUs per node, can also define type of GPU eg. gpu:tesla, gpu:k80, gpu:p100, gpu:v100
+#SBATCH --mem=60G                   # Define memory per GPU
+#SBATCH --time=00:10:00                    # Wall time (hh:mm:ss)
 #SBATCH --mail-user=jd18380@bristol.ac.uk  # Email address for job notifications
-#SBATCH --mail-type=END,FAIL                   # Email notifications (BEGIN, END, FAIL)
+#SBATCH --mail-type=FAIL                   # Email notifications (BEGIN, END, FAIL)
 #SBATCH --account=MATH026823
 
 # Define executable
@@ -31,13 +32,18 @@ echo Start Time: $(date)
 # Print GPU information
 nvidia-smi --query-gpu=name --format=csv,noheader
 
+nvidia-smi
+
 # Activate virtual environment (if you have one), change the path to match the location of your virtual environment
 source .venv/bin/activate
 
 # Where we run the script to perform training run with model, 
 # first argument to this job script will be the python script to run,
 # the rest of the arguments passed to the job script will be passed as arguments to the python script
-python data_mosi_mosei.py
+# python train.py --benchmark=nyu_v2_13 --model=ResNet101 --est=SimCLR 
+python train.py --benchmark=nyu_v2_13 --model=ResNet101 --est=info_critic
+# python train.py --benchmark=mosi --model=MosiFusion --est=SimCLR
+# python train.py --benchmark=mosei --model=MoseiFusion --est=SimCLR
 
 # End of job script, let's print the time at which we finished
 echo End Time: $(date)

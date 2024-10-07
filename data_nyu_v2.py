@@ -110,7 +110,7 @@ def get_nyu_v2(num_classes: int):
     
     return ds_train, ds_test, ds_train_supervised, ds_test_supervised
 
-def nyu_v2_get_data_loaders(batch_size: int, num_classes: int):
+def nyu_v2_get_data_loaders(batch_size: int, num_classes: int, num_workers: int = 0):
     """
     Returns train and test set data loaders for the NYUv2 dataset (https://cs.nyu.edu/~fergus/datasets/nyu_depth_v2.html).
     We use the TensorFlow Datasets version of the dataset (https://www.tensorflow.org/datasets/catalog/nyu_depth_v2) for unsupervised training.
@@ -129,12 +129,12 @@ def nyu_v2_get_data_loaders(batch_size: int, num_classes: int):
     ds_train, ds_test, ds_train_supervised, ds_test_supervised = get_nyu_v2(num_classes)
 
     # these dont need shuffling (handled through tdfs)
-    train_loader = DataLoader(ds_train, batch_size=batch_size, shuffle=False, pin_memory=True)
-    test_loader = DataLoader(ds_test, batch_size=batch_size, shuffle=False, pin_memory=True)
+    train_loader = DataLoader(ds_train, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=num_workers)
+    test_loader = DataLoader(ds_test, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=num_workers)
 
     # these need shuffling
-    train_supervised_loader = DataLoader(ds_train_supervised, batch_size=batch_size, shuffle=True, pin_memory=True)
-    test_supervised_loader = DataLoader(ds_test_supervised, batch_size=batch_size, shuffle=False, pin_memory=True)
+    train_supervised_loader = DataLoader(ds_train_supervised, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=num_workers)
+    test_supervised_loader = DataLoader(ds_test_supervised, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=num_workers)
     return train_loader, test_loader, train_supervised_loader, test_supervised_loader
 
 def compute_norm():

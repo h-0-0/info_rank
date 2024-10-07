@@ -14,15 +14,32 @@ import os
 from model import FusionModel, LinearClassifier, ImageModel, AudioModel, ResNet101, SegClassifier, ResNet50, MosiFusion, MoseiFusion, Regression
 from loss import SimCLR_loss, info_critic, info_critic_plus, prob_loss, decomposed_loss, get_train_accuracy, augmenter
 
-def supervised_train(model, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality='image+audio'):
-    # Create classifier
-    linear_classifier = LinearClassifier(model.output_dim, 10).to(device)
+def supervised_train(model, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality='image+audio', classifier_type='linear_10'):
+    if 'linear' in classifier_type:
+        _, num_classes = classifier_type.split('_')
+        num_classes = int(num_classes)
+        classifier = LinearClassifier(model.output_dim, num_classes)
+        classifier = MyDataParallel(classifier)
+        classifier = classifier.to(device)
+        criterion = nn.CrossEntropyLoss()
+    elif 'seg' in classifier_type:
+        _, num_classes = classifier_type.split('_')
+        num_classes = int(num_classes)
+        classifier = SegClassifier(num_classes)
+        classifier = MyDataParallel(classifier)
+        classifier = classifier.to(device)
+        criterion = nn.CrossEntropyLoss()
+    elif classifier_type == 'regr':
+        classifier = Regression(model.output_dim)
+        classifier = MyDataParallel(classifier)
+        classifier = classifier.to(device)
+        criterion = nn.MSELoss()
+
     # Set-up for training
     best_loss = float('inf') # For early stopping
     patience_counter = 0 # For early stopping
     cum_b = -1
 
-    losses = []
     epoch_losses = []
     epoch_train_accuracies = []
 
@@ -42,22 +59,11 @@ def supervised_train(model, optimizer, train_loader, device, writer, saver, num_
             # Zero the gradients
             optimizer.zero_grad()
             # Forward pass
-            if modality == 'image+audio':
-                image, audio, labels = batch
-                batch = (image.to(device), audio.to(device))
-            elif modality == 'image':
-                image, _, labels = batch
-                batch = image.to(device)
-            elif modality == 'audio':
-                _, audio, labels = batch
-                batch = audio.to(device)
-            else:
-                raise ValueError("Invalid aug")
+            batch, labels = get_batch_labels(modality, batch, device)
             rep = model(batch)
-            logits = linear_classifier(rep)
+            logits = classifier(rep)
             labels = labels.to(device)
-            loss = F.cross_entropy(logits, labels)
-            losses.append(loss.item())
+            loss = criterion(logits, labels)
             epoch_losses.append(loss.item())
             writer.add_scalar('Loss/train', loss.item(), cum_b)
             saver.log({'train_loss': loss.item()})
@@ -75,7 +81,7 @@ def supervised_train(model, optimizer, train_loader, device, writer, saver, num_
             # If we have NaNs, stop training
             if torch.isnan(loss):
                 print("NaNs encountered, stopping training", flush=True)
-                return losses, model, linear_classifier
+                return model, classifier
             
         if (epoch + 1) % 25 == 0:
             # Print progress
@@ -104,9 +110,9 @@ def supervised_train(model, optimizer, train_loader, device, writer, saver, num_
             if patience_counter >= patience:
                 print("Early stopping at epoch:"+str(epoch+1), flush=True)
                 break
-    return losses, model, linear_classifier
+    return model, classifier
     
-def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperature, device, writer, saver, num_epochs, patience, modality='image+audio', grad_clip=None):
+def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperature, device, writer, saver, num_epochs, patience, modality='image+audio'):
     # Set-up for training
     best_loss = float('inf') # For early stopping
     patience_counter = 0 # For early stopping
@@ -118,7 +124,7 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
         batch_stop = num_epochs * len(train_loader)
         num_epochs = 1
     num_epochs = int(num_epochs)
-    scaler = torch.amp.GradScaler()
+    # scaler = torch.amp.GradScaler() #TODO: remove
     for e, epoch in enumerate(range(num_epochs)):
         epoch_losses = []
         epoch_train_accs = []
@@ -135,13 +141,11 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
                 # Forward pass
                 loss = loss_fun(model, batch1, batch2, temperature, device)
             # Backward pass and optimization
-            # loss.backward()
-            scaler.scale(loss).backward()
-            # optimizer.step()
-            if grad_clip is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
-            scaler.step(optimizer)
-            scaler.update()
+            loss.backward()
+            # scaler.scale(loss).backward() #TODO: remove
+            optimizer.step()
+            # scaler.step(optimizer) #TODO: remove
+            # scaler.update() #TODO: remove
 
             # Log memory usage 
             log_memory(writer, cum_b)
@@ -156,8 +160,9 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
                 with torch.no_grad():
                     accs = get_train_accuracy(model, batch1, batch2, est, device)
             epoch_train_accs.append(accs)
-            writer.add_scalar('Accuracy/train', accs['accuracy'].item(), cum_b)
-            saver.log({'train_acc': accs['accuracy'].item()})
+            acc = accs['accuracy'].item() if torch.is_tensor(accs['accuracy']) else accs['accuracy']
+            writer.add_scalar('Accuracy/train', acc, cum_b)
+            saver.log({'train_acc': acc})
 
             # If we have NaNs, stop training
             if torch.isnan(loss):
@@ -174,7 +179,10 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
         saver.log({'train_loss_epoch_avg': avg_loss})
 
         for key in epoch_train_accs[0].keys():
-            avg_train_acc = np.mean([x[key].item() for x in epoch_train_accs])
+            if torch.is_tensor(epoch_train_accs[0][key]):
+                avg_train_acc = np.mean([x[key].item() for x in epoch_train_accs])
+            else:
+                avg_train_acc = np.mean([x[key] for x in epoch_train_accs])
             writer.add_scalar('Accuracy/epoch_avg_'+key, avg_train_acc, e)
             saver.log({'train_acc_epoch_avg_'+key: avg_train_acc})
 
@@ -191,7 +199,7 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
                 break
     return model
             
-def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size, modality='image+audio', classifier_type='linear_10'):
+def eval_train(model, optimizer, train_loader, device, writer, saver, lr, num_epochs, patience, modality='image+audio', classifier_type='linear_10'):
     # Define the linear classifier
     # Find output size of network
     if 'linear' in classifier_type:
@@ -213,18 +221,15 @@ def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size
         classifier = MyDataParallel(classifier)
         classifier = classifier.to(device)
         criterion = nn.MSELoss()
-    learning_rate = 0.1 * batch_size / 256
-    optimizer = optim.SGD(classifier.parameters(), lr=learning_rate)
+    optimizer = optim.SGD(classifier.parameters(), lr=lr)
     for param in model.parameters():
         param.requires_grad = False
 
     # Train the linear classifier
     cum_b = -1
-    num_epochs = 50
-    patience = 50 # For early stopping
     best_loss = float('inf') # For early stopping
     patience_counter = 0 # For early stopping
-    scaler = torch.amp.GradScaler()
+    # scaler = torch.amp.GradScaler() #TODO: remove
     for e, epoch in enumerate(range(num_epochs)):
         epoch_losses = []
         for b, batch in enumerate(train_loader):
@@ -234,16 +239,15 @@ def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size
                 rep = model(batch)
     
             with torch.autocast('cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float16):
-                optimizer.zero_grad()
                 logits = classifier(rep)
                 loss = criterion(logits, labels)
 
             # Backward pass and optimization
-            # loss.backward()
-            scaler.scale(loss).backward()
-            # optimizer.step()
-            scaler.step(optimizer)
-            scaler.update()
+            loss.backward() 
+            # scaler.scale(loss).backward() #TODO: remove
+            optimizer.step() 
+            # scaler.step(optimizer) #TODO: remove
+            # scaler.update() #TODO: remove
             optimizer.zero_grad() # We zero gradients to save memory
 
             epoch_losses.append(loss.item())
@@ -279,15 +283,20 @@ def eval_train(model, optimizer, train_loader, device, writer, saver, batch_size
 def test(model, classifier, data_loader, device, writer, saver, name='test', modality='image+audio'):
     # Test the classifier
     model.eval()  # Set the model to evaluation mode
+    classifier.eval()  # Set the classifier to evaluation mode
     total_loss = 0.0
     total_samples = 0
     total_batches = 0
     num_classes = classifier.num_classes
     metrics = get_torchmetrics(modality, num_classes, device)
     if modality == 'image_ft+audio_ft+text':
+        # Regression task
         criterion = nn.MSELoss()
+        get_predicitons = lambda x: x
     else:
+        # Classification task
         criterion = nn.CrossEntropyLoss()
+        get_predicitons = lambda x: torch.max(x, 1)[1]
     with torch.no_grad():
         for batch in data_loader:
             batch, labels = get_batch_labels(modality, batch, device)
@@ -299,11 +308,11 @@ def test(model, classifier, data_loader, device, writer, saver, name='test', mod
             total_batches += 1
             total_samples += len(labels)
             # Compute metrics 
-            _, predicted = torch.max(logits.data, 1)
-            if len(predicted.shape) ==1:
-                predicted = predicted.unsqueeze(1)
-            if len(labels.shape) ==1:
-                labels = labels.unsqueeze(1)
+            predicted = get_predicitons(logits)
+            if len(predicted.shape) !=1:
+                predicted = predicted.squeeze(1)
+            if len(labels.shape) !=1:
+                labels = labels.squeeze(1)
             for metric in metrics.values():
                 metric(predicted, labels)
 
@@ -335,7 +344,6 @@ def train(**kwargs):
         temperature: float (temperature for the estimator)
         output_dim: int (output dimension of the model)
         optimizer: Literal['SGD', 'Adam'] (optimizer to use)
-        grad_clip: Optional[float] (max_norm for gradient clipping, if not given no clipping is done)
 
     Returns:
         losses: list
@@ -356,11 +364,9 @@ def train(**kwargs):
     temperature = kwargs['temperature']
     output_dim = kwargs['output_dim']
     optimizer = kwargs['optimizer']
-    if kwargs['grad_clip'] == None:
-        grad_clip = None
-        kwargs['grad_clip'] = 'None'
-    else:
-        grad_clip = kwargs['grad_clip']
+    eval_lr = kwargs.get('eval_lr', 0.1 * batch_size / 256)
+    eval_num_epochs = kwargs.get('eval_num_epochs', 50)
+    eval_patience = kwargs.get('eval_patience', None)
 
     # Create save location using slune and tensorboard writer
     saver = slune.get_csv_saver(kwargs, root_dir='results')
@@ -377,9 +383,11 @@ def train(**kwargs):
         train_loader, test_loader = digits_get_data_loaders(batch_size=batch_size)
         eval_train_loader = train_loader
     elif benchmark == "nyu_v2_13":
-        train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=13)
+        torch.backends.cudnn.benchmark = True
+        train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=13, num_workers=4)
     elif benchmark == "nyu_v2_40":
-        train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=40)
+        torch.backends.cudnn.benchmark = True
+        train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=40, num_workers=4)
     elif benchmark == "mosi":
         train_loader, _, test_loader = mosi_get_data_loaders(batch_size=batch_size)
         eval_train_loader = train_loader
@@ -403,12 +411,10 @@ def train(**kwargs):
         classifier_type = 'linear_10'
     elif model == "ResNet101":
         model = ResNet101(output_dim=output_dim)
-        model = MyDataParallel(model)
         modality = 'image+depth'
         classifier_type = 'seg_14' if benchmark == "nyu_v2_13" else 'seg_41'
     elif model == "ResNet50":
         model = ResNet50(output_dim=output_dim)
-        model = MyDataParallel(model)
         modality = 'image+depth'
         classifier_type = 'seg_14' if benchmark == "nyu_v2_13" else 'seg_41'
     elif model == "MosiFusion":
@@ -430,12 +436,12 @@ def train(**kwargs):
         raise ValueError("Invalid optimizer")
 
     # If we want to do supervised training, otherwise continue on to unsupervised training
-    if est == "supervised" and benchmark == "written_spoken_digits":
-        losses, model, linear_classifier = supervised_train(model, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality)
-        test(model, linear_classifier, test_loader, device, writer, saver, name='test', modality=modality)
-        test(model, linear_classifier, train_loader, device, writer, saver, name='train', modality=modality)
+    if est == "supervised" and benchmark in ["written_spoken_digits", "mosi", "mosei"]:
+        model, classifier = supervised_train(model, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality, classifier_type=classifier_type)
+        test(model, classifier, test_loader, device, writer, saver, name='test', modality=modality)
+        test(model, classifier, train_loader, device, writer, saver, name='train', modality=modality)
         saver.save_collated()
-        return model, linear_classifier
+        return model, classifier
     elif est == "supervised":
         raise ValueError("Invalid estimator for benchmark")
 
@@ -454,10 +460,10 @@ def train(**kwargs):
         raise ValueError("Invalid est(imator)")
 
     # Train the model
-    model = unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperature, device, writer, saver, num_epochs, patience, modality=modality, grad_clip=grad_clip)
+    model = unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperature, device, writer, saver, num_epochs, patience, modality=modality)
 
     # Now that we have trained the model, we evaluate it by training a linear classifier on top of the frozen representations
-    model, classifier = eval_train(model, optimizer, eval_train_loader, device, writer, saver, batch_size, modality=modality, classifier_type=classifier_type)
+    model, classifier = eval_train(model, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality, classifier_type=classifier_type)
 
     # Evaluate the model on the test set
     test(model, classifier, test_loader, device, writer, saver, 'test', modality=modality)
@@ -482,13 +488,13 @@ if __name__ == "__main__":
         'est': args.est,
         'model': args.model,
         'learning_rate': 1e-3, 
-        'num_epochs': 0.0003,
-        'batch_size': 16, #16
+        'num_epochs': 5, #0.0003,
+        'batch_size': 64, #16
         'patience': 10,
         'temperature': 1,
-        'output_dim': 128, #2028
-        'optimizer': 'Adam',
-        'grad_clip': None,
+        'output_dim': 2048,
+        'optimizer': 'SGD',
+        'eval_num_epochs': 10,
     }
     # Train the model
     model = train(**config)

@@ -132,50 +132,75 @@ def _info_critic_acc(scores, device):
 #         v = model(v)
 #         vs.append(v)
 #     else:
-#         scores = []
-#         losses = []
-#         for i, disturb in enumerate(to_disturb):
+#         for disturb in to_disturb:
 #             v = [batch2[i].roll(1, 0) if disturb[i] else batch2[i] for i in range(num_modalities)]
 #             v = model(v)
-#             s = model.score(u, v)
-#             if acc:
-#                 scores.append(s)
-#             else:
-#                 l = F.cross_entropy(s, torch.empty(s.shape[0], dtype=torch.long).fill_(i).to(device), reduction='mean')
-#                 losses.append(l)
+#             vs.append(v)
+#     scores = [model.score(u, v) for v in vs]
+
 #     if acc:
 #         return _info_critic_acc(scores, device)
-
+#     # We then compute the cross entropy loss between the scores and the correct logits
+#     losses = [F.cross_entropy(s, torch.empty(s.shape[0], dtype=torch.long).fill_(i).to(device), reduction='mean') for i, s in enumerate(scores)]
+#     print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024), flush=True) # TODO: Remove
+#     print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024), flush=True) # TODO: Remove
+#     print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024), flush=True) # TODO: Remove
 #     # We then sum the losses and return them
 #     loss = sum(losses) / len(losses)
 #     return loss
 
+def _info_critic_single_modality(model, batch1, batch2, temperature, device, acc=False):
+    scores = []
+    u = model(batch1)
+    v = model(batch2)
+    score_0 = model.score(u, v)
+    scores.append(score_0)
+
+    v = batch2.roll(1, 0)
+    v = model(v)
+    score_1 = model.score(u, v)
+    scores.append(score_1)
+    if acc:
+        return _info_critic_acc(scores, device)
+    loss = F.cross_entropy(score_0, torch.empty(score_0.shape[0], dtype=torch.long).fill_(0).to(device), reduction='mean')
+    loss += F.cross_entropy(score_1, torch.empty(score_1.shape[0], dtype=torch.long).fill_(1).to(device), reduction='mean')
+    return loss
+
 def info_critic(model, batch1, batch2, temperature, device, acc=False):
+    try:
+        encode_batch = model.encode_batch
+    except AttributeError:
+        encode_batch = False
+
     num_modalities = len(batch1) if not torch.is_tensor(batch1) else 1
+    if num_modalities == 1:
+        return _info_critic_single_modality(model, batch1, batch2, temperature, device, acc)
     to_disturb = generate_binary_combinations(num_modalities)
     # Create u, the anchors
     u = model(batch1)
-    vs = []
-    if num_modalities == 1:
-        vs.append(model(batch2))
-        v = batch2.roll(1, 0)
-        v = model(v)
-        vs.append(v)
-    else:
-        for disturb in to_disturb:
-            v = [batch2[i].roll(1, 0) if disturb[i] else batch2[i] for i in range(num_modalities)]
+    if encode_batch:
+        batch2 = model.encode_modalities(batch2)
+    if acc:
+        scores = []
+    loss = 0
+    for i, disturb in enumerate(to_disturb):
+        v = [batch2[i].roll(1, 0) if disturb[i] else batch2[i] for i in range(num_modalities)]
+        if encode_batch:
+            v = model.fuse(v)
+        else:
             v = model(v)
-            vs.append(v)
-
-    scores = [model.score(u, v) for v in vs]
-
+        score = model.score(u, v) 
+        if acc:
+            scores.append(score)
+        else:
+            loss = F.cross_entropy(score, torch.empty(score.shape[0], dtype=torch.long).fill_(i).to(device), reduction='mean')
+            loss = loss / len(to_disturb)
+            if i == len(to_disturb) - 1:
+                loss = loss
+            else:
+                loss.backward(retain_graph=True)
     if acc:
         return _info_critic_acc(scores, device)
-
-    # We then compute the cross entropy loss between the scores and the correct logits
-    losses = [F.cross_entropy(s, torch.empty(s.shape[0], dtype=torch.long).fill_(i).to(device), reduction='mean') for i, s in enumerate(scores)]
-    # We then sum the losses and return them
-    loss = sum(losses) / len(losses)
     return loss
 
 def info_critic_plus(model, batch1, batch2, temperature, device, acc=False):

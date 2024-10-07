@@ -1,4 +1,4 @@
-torch==2.3.0
+torch>2.4
 torchvision
 torchaudio
 numpy<2
@@ -14,5 +14,4 @@ datasets
 h5py
 pillow
 accelerate
-torchtext==0.18
 torchmetrics

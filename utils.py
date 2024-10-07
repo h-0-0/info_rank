@@ -134,18 +134,6 @@ def log_memory(writer, step):
         writer.add_scalar('Memory/GPU_Allocated_MB', gpu_memory_allocated, step)
         writer.add_scalar('Memory/GPU_Reserved_MB', gpu_memory_reserved, step)
 
-def mapto7classes(labels):
-    """
-    Function to map the MOSI and MOSEI labels to 7 classes.
-    """
-    labels = torch.where(labels < -2.5, 0,
-             torch.where(labels < -1.5, 1,
-             torch.where(labels < -0.5, 2,
-             torch.where(labels < 0.5, 3,
-             torch.where(labels < 1.5, 4,
-             torch.where(labels < 2.5, 5, 6))))))
-    return labels
-
 def get_batch_labels(modality, batch, device):
     if modality in ['image+audio', 'image', 'audio', 'image+depth']:
         modality0, modality1, labels = batch
@@ -161,8 +149,6 @@ def get_batch_labels(modality, batch, device):
     elif modality == 'image_ft+audio_ft+text':
         modality0, modality1, modality2, labels = batch
         modality0, modality1, modality2, labels = modality0.to(device), modality1.to(device), modality2.to(device), labels.to(device)
-        # labels = mapto7classes(labels) TODO: Remove
-        # labels = labels.view(-1) #TODO: Remove
         batch = (modality0, modality1, modality2)
     else:
         raise ValueError("Invalid modality")
@@ -224,8 +210,8 @@ class CustomSevenAccuracy(torchmetrics.Metric):
 
     def update(self, preds: torch.Tensor, target: torch.Tensor):
         # Convert scalar predictions to class in [0, 6]
-        preds_7 = mapto7classes(preds)
-        target_7 = mapto7classes(target)
+        preds_7 = torch.round(preds) +3
+        target_7 = torch.round(target) +3
 
         # Calculate correct predictions
         correct = torch.eq(preds_7, target_7).sum()
@@ -238,23 +224,25 @@ class CustomSevenAccuracy(torchmetrics.Metric):
 
 from torchmetrics.functional import f1_score
 class CustomF1Score(torchmetrics.Metric):
-    def __init__(self, num_classes=7, average='macro', dist_sync_on_step=False):
+    def __init__(self, threshold=0, average='macro', dist_sync_on_step=False):
         super().__init__(dist_sync_on_step=dist_sync_on_step)
-        self.num_classes = num_classes
+        self.threshold = threshold
         self.average = average
         self.add_state("preds", default=[], dist_reduce_fx="cat")
         self.add_state("target", default=[], dist_reduce_fx="cat")
 
     def update(self, preds: torch.Tensor, target: torch.Tensor):
-        preds = mapto7classes(preds)
-        target = mapto7classes(target)
+        # preds = torch.round(preds) +3 #TODO: remove
+        # target = torch.round(target) +3 #TODO: remove
+        preds = (preds >= self.threshold).long()
+        target = (target >= self.threshold).long()
         self.preds.append(preds)
         self.target.append(target)
 
     def compute(self):
         preds = torch.cat(self.preds)
         target = torch.cat(self.target)
-        return f1_score(preds, target, num_classes=self.num_classes, average=self.average, task='multiclass')
+        return f1_score(preds, target, average=self.average, task='binary')
     
 def get_torchmetrics(modality, num_classes, device):
     metrics = {}
@@ -273,7 +261,7 @@ def get_torchmetrics(modality, num_classes, device):
         seven_accuracy = CustomSevenAccuracy().to(device)
         binary_accuracy = CustomBinaryAccuracy().to(device)
         strict_binary_accuracy = CustomStrictBinaryAccuracy().to(device)
-        f1 = CustomF1Score(num_classes=7).to(device)
+        f1 = CustomF1Score().to(device)
 
         metrics['mse'] = mse
         metrics['7_acc'] = seven_accuracy
