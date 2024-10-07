@@ -31,9 +31,9 @@ if  __name__ == "__main__":
     }
 
     # Join dictionary
-    to_search.update(SimCLR) 
+    # to_search.update(SimCLR) 
     # to_search.update(info_critic)
-    # to_search.update(supervised)
+    to_search.update(supervised)
 
     # info_critic unsupervised doesn's seem to be working
     # eval train looks better than MOSI, but accuracy achieved same for random as for trained

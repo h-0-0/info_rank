@@ -33,9 +33,9 @@ if  __name__ == "__main__":
     }
 
     # Join dictionary
-    # to_search.update(SimCLR) 
+    to_search.update(SimCLR) 
     # to_search.update(info_critic)
-    to_search.update(supervised)
+    # to_search.update(supervised)
 
     # Trying shallower thinner GRUs, no dropout in fusion layer, smaller output dim and thinned lr
     # Now trying better range of lrs and increased unsupervised num_epochs and batch size, also wide range of output dims
