@@ -60,10 +60,11 @@ def supervised_train(model, optimizer, train_loader, device, writer, saver, num_
             optimizer.zero_grad()
             # Forward pass
             batch, labels = get_batch_labels(modality, batch, device)
-            rep = model(batch)
-            logits = classifier(rep)
-            labels = labels.to(device)
-            loss = criterion(logits, labels)
+            with torch.autocast('cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float16):
+                rep = model(batch)
+                logits = classifier(rep)
+                labels = labels.to(device)
+                loss = criterion(logits, labels)
             epoch_losses.append(loss.item())
             writer.add_scalar('Loss/train', loss.item(), cum_b)
             saver.log({'train_loss': loss.item()})
@@ -448,6 +449,7 @@ def train(**kwargs):
     if est == "supervised" :
         if benchmark == "nyu_v2_13" or benchmark == "nyu_v2_40":
             model, classifier = supervised_train(model, optimizer, eval_train_loader, device, writer, saver, num_epochs, patience, modality=modality, classifier_type=classifier_type)
+            train_loader = eval_train_loader
         elif benchmark == "mosi" or benchmark == "mosei":
             model, classifier = supervised_train(model, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality, classifier_type=classifier_type)
             model, classifier = eval_train(model, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality, classifier_type=classifier_type, classifier=classifier)
@@ -504,7 +506,7 @@ if __name__ == "__main__":
         'model': args.model,
         'learning_rate': 1e-3, 
         'num_epochs': 5, #0.0003,
-        'batch_size': 64, #16
+        'batch_size': 40, #16
         'patience': 10,
         'temperature': 1,
         'output_dim': 2048,
