@@ -133,6 +133,12 @@ def download_AudioMNIST(viz = True, cleanup=True):
     if cleanup:
         os.system('rm -rf data/AudioMNIST/')
 
+def min_max_normalization(tensor):
+    min_val = np.min(tensor)
+    max_val = np.max(tensor)
+    normalized_tensor = (tensor - min_val) / (max_val - min_val + 1e-8)
+    return normalized_tensor
+
 def get_AudioMNIST() -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset]:
     """
     Checks if the AudioMNIST dataset (https://github.com/soerenab/AudioMNIST) is downloaded and processed, returns it if it is.
@@ -170,10 +176,17 @@ def get_AudioMNIST() -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset
     test_labels = test_labels[sorted_test_indices]
     
     # Convert to tensors
-    trans = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])
+    # trans = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True)]) #TODO Remove
+    trans = transforms.Compose([transforms.ToTensor()])
+    
+    train_data = min_max_normalization(train_data)
     train_data = torch.stack([trans(d) for d in train_data])
+
     train_labels = torch.tensor(train_labels, dtype=torch.long)
+
+    test_data = min_max_normalization(test_data)
     test_data = torch.stack([trans(d) for d in test_data])
+    
     test_labels = torch.tensor(test_labels, dtype=torch.long)
 
     return train_data, train_labels, test_data, test_labels
@@ -193,21 +206,21 @@ def digits_get_data_loaders(batch_size):
 
     """
     # Check if datasets exist and load them if they do
-    if os.path.exists(os.path.join('data','digits_train_data.pt')) and os.path.exists(os.path.join('data','digits_test_data.pt')):
-        train_data = torch.load('data/digits_train_data.pt')
-        test_data = torch.load('data/digits_test_data.pt')
-    else:
-        audio_train_data, audio_train_labels, audio_test_data, audio_test_labels = get_AudioMNIST()
-        images_train_data, images_train_labels, images_test_data, images_test_labels = get_ImageMNIST()
-        assert (audio_train_labels == images_train_labels).all()
-        assert (audio_test_labels == images_test_labels).all()
-        # Combine training sets so that we match images and audio samples according to label
-        train_data = torch.utils.data.TensorDataset(images_train_data, audio_train_data, images_train_labels)
-        # Combine test sets so that we match images and audio samples according to label
-        test_data = torch.utils.data.TensorDataset(images_test_data, audio_test_data, images_test_labels)
-        # Save the datasets
-        torch.save(train_data, 'data/digits_train_data.pt')
-        torch.save(test_data, 'data/digits_test_data.pt')
+    # if os.path.exists(os.path.join('data','digits_train_data.pt')) and os.path.exists(os.path.join('data','digits_test_data.pt')):
+    #     train_data = torch.load('data/digits_train_data.pt')
+    #     test_data = torch.load('data/digits_test_data.pt')
+    # else:
+    audio_train_data, audio_train_labels, audio_test_data, audio_test_labels = get_AudioMNIST()
+    images_train_data, images_train_labels, images_test_data, images_test_labels = get_ImageMNIST()
+    assert (audio_train_labels == images_train_labels).all()
+    assert (audio_test_labels == images_test_labels).all()
+    # Combine training sets so that we match images and audio samples according to label
+    train_data = torch.utils.data.TensorDataset(images_train_data, audio_train_data, images_train_labels)
+    # Combine test sets so that we match images and audio samples according to label
+    test_data = torch.utils.data.TensorDataset(images_test_data, audio_test_data, images_test_labels)
+    # Save the datasets
+    # torch.save(train_data, 'data/digits_train_data.pt')
+    # torch.save(test_data, 'data/digits_test_data.pt')
 
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
     test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=True)
@@ -219,21 +232,23 @@ if __name__ == '__main__':
     Produces some visualizations of the data and saves some of the audio in listenable format.
     """
     print("------ Find visualisations in the /viz directory ------")
-    n_b = 4
-    train_loader, test_loader = digits_get_data_loaders(4)
-    image_batch, audio_batch, label_batch = next(iter(train_loader))
-    print(f"Image batch shape: {image_batch.shape}")
-    print(f"Audio batch shape: {audio_batch.shape}")
-    print(f"Label batch shape: {label_batch.shape}")
+    # n_b = 4
+    # train_loader, test_loader = digits_get_data_loaders(4)
+    # image_batch, audio_batch, label_batch = next(iter(train_loader))
+    # print(f"Image batch shape: {image_batch.shape}")
+    # print(f"Audio batch shape: {audio_batch.shape}")
+    # print(f"Label batch shape: {label_batch.shape}")
+
     # Create plot of subplots where each column shows the image and mfcc audio with title telling us the label for one sample from the batch
-    fig, axes = plt.subplots(2, n_b, figsize=(10, 5))
-    for i in range(n_b):
-        axes[0, i].imshow(image_batch[i].squeeze(), cmap='gray')
-        axes[0, i].set_title(f"Label: {label_batch[i]}")
-        axes[1, i].imshow(audio_batch[i].squeeze(), cmap='gray')
-    if not os.path.exists('viz/written_spoken_digits'):
-        os.makedirs('viz/written_spoken_digits')
-    plt.savefig('viz/written_spoken_digits/batch.png')
+    # fig, axes = plt.subplots(2, n_b, figsize=(10, 5))
+    # for i in range(n_b):
+    #     axes[0, i].imshow(image_batch[i].squeeze(), cmap='gray')
+    #     axes[0, i].set_title(f"Label: {label_batch[i]}")
+    #     axes[1, i].imshow(audio_batch[i].squeeze(), cmap='gray')
+    # if not os.path.exists('viz/written_spoken_digits'):
+    #     os.makedirs('viz/written_spoken_digits')
+    # plt.savefig('viz/written_spoken_digits/batch.png')
+
     # Plot bar chart of number of samples in each class
     # plt.figure()
     # plt.bar(range(10), [len(train_loader.dataset[i]) for i in range(10)])
@@ -242,3 +257,20 @@ if __name__ == '__main__':
     # plt.title('Number of samples in each class')
     # plt.xticks(range(10))
     # plt.savefig('viz/class_dist.png')
+
+    # Calculate audio data norm per coefficient
+    train_loader, test_loader = digits_get_data_loaders(200)
+    sum = 0
+    sum_squared = 0
+    n = 0
+    for i, (image_batch, audio_batch, label_batch) in enumerate(train_loader):
+        if i ==0:
+            print("Shape: ", audio_batch.sum((0,1,3)).shape)
+        sum += audio_batch.sum((0,1,3))
+        sum_squared += (audio_batch**2).sum((0,1,3))
+        n += audio_batch.shape[0] * audio_batch.shape[1] * audio_batch.shape[3]
+    mean = sum / n
+    std = torch.sqrt((sum_squared / n) - (mean**2))
+    print("Mean: ", mean)
+    print("Std: ", std)
+    
