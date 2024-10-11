@@ -200,37 +200,28 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
                 break
     return model
             
-def eval_train(model, optimizer, train_loader, device, writer, saver, lr, num_epochs, patience, modality='image+audio', classifier_type='linear_10', classifier=None):
+def eval_train(model, optimizer, train_loader, device, writer, saver, lr, num_epochs, patience, modality='image+audio', classifier_type='linear_10'):
     # Define the linear classifier
     # Find output size of network
-    if classifier is None:
-        if 'linear' in classifier_type:
-            _, num_classes = classifier_type.split('_')
-            num_classes = int(num_classes)
-            classifier = LinearClassifier(model.output_dim, num_classes)
-            classifier = MyDataParallel(classifier)
-            classifier = classifier.to(device)
-            criterion = nn.CrossEntropyLoss()
-        elif 'seg' in classifier_type:
-            _, num_classes = classifier_type.split('_')
-            num_classes = int(num_classes)
-            classifier = SegClassifier(num_classes)
-            classifier = MyDataParallel(classifier)
-            classifier = classifier.to(device)
-            criterion = nn.CrossEntropyLoss()
-        elif classifier_type == 'regr':
-            classifier = Regression(model.output_dim)
-            classifier = MyDataParallel(classifier)
-            classifier = classifier.to(device)
-            criterion = nn.MSELoss()
-    else:
+    if 'linear' in classifier_type:
+        _, num_classes = classifier_type.split('_')
+        num_classes = int(num_classes)
+        classifier = LinearClassifier(model.output_dim, num_classes)
+        classifier = MyDataParallel(classifier)
         classifier = classifier.to(device)
-        if 'linear' in classifier_type:
-            criterion = nn.CrossEntropyLoss()
-        elif 'seg' in classifier_type:
-            criterion = nn.CrossEntropyLoss()
-        elif classifier_type == 'regr':
-            criterion = nn.MSELoss()
+        criterion = nn.CrossEntropyLoss()
+    elif 'seg' in classifier_type:
+        _, num_classes = classifier_type.split('_')
+        num_classes = int(num_classes)
+        classifier = SegClassifier(num_classes)
+        classifier = MyDataParallel(classifier)
+        classifier = classifier.to(device)
+        criterion = nn.CrossEntropyLoss()
+    elif classifier_type == 'regr':
+        classifier = Regression(model.output_dim)
+        classifier = MyDataParallel(classifier)
+        classifier = classifier.to(device)
+        criterion = nn.MSELoss()
     optimizer = optim.SGD(classifier.parameters(), lr=lr)
     for param in model.parameters():
         param.requires_grad = False
@@ -452,7 +443,7 @@ def train(**kwargs):
             train_loader = eval_train_loader
         elif benchmark == "mosi" or benchmark == "mosei":
             model, classifier = supervised_train(model, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality, classifier_type=classifier_type)
-            model, classifier = eval_train(model, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality, classifier_type=classifier_type, classifier=classifier)
+            model, classifier = eval_train(model, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality, classifier_type=classifier_type)
         elif benchmark == "written_spoken_digits":
             model, classifier = supervised_train(model, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality, classifier_type=classifier_type)
         test(model, classifier, test_loader, device, writer, saver, name='test', modality=modality)
