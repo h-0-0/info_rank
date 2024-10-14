@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
-from torchvision import transforms as iT
+from torchvision.transforms import v2 as iT
 from torchaudio import transforms as aT
 from utils import generate_binary_combinations, swap_halves, dual_batch_indice_permutation, create_distribution, rnd_idx_without
 import math
@@ -12,6 +12,38 @@ def cosine_sim(y, temperature=0.1):
     similarity_matrix = torch.matmul(y_norm, y_norm.T) / temperature
     return similarity_matrix
 
+class RandomSequentialCropResize(torch.nn.Module):
+    def __init__(self, crop_ratio=0.8):
+        super().__init__()
+        self.crop_ratio = crop_ratio
+    
+    def forward(self, x):
+        original_length = x.shape[1]
+        crop_size = int(original_length * self.crop_ratio)
+        start = torch.randint(0, original_length - crop_size + 1, (1,))
+        cropped = x[:, start:start+crop_size]
+        resized = torch.nn.functional.interpolate(cropped, size=original_length, mode='linear', align_corners=False).squeeze(1)
+        return resized
+
+class TimeWarp(torch.nn.Module):
+    def __init__(self, warp_factor=0.2):
+        super().__init__()
+        self.warp_factor = warp_factor
+    
+    def forward(self, x):
+        orig_steps = torch.arange(x.shape[1])
+        warp_steps = orig_steps + torch.randn(x.shape[1]) * self.warp_factor
+        warp_steps = torch.clamp(warp_steps, 0, x.shape[1] - 1)
+        return torch.nn.functional.interpolate(x, size=x.shape[1], mode='linear', align_corners=False).squeeze(1)
+
+class Jitter(torch.nn.Module):
+    def __init__(self, sigma=0.03):
+        super().__init__()
+        self.sigma = sigma
+    
+    def forward(self, x):
+        return x + torch.randn_like(x) * self.sigma
+    
 def image_aug(x, type='mnist'):
     """
     Returns augmentation function for tensors of images.
@@ -39,8 +71,18 @@ def image_aug(x, type='mnist'):
         ])
     else:
         raise ValueError("Invalid type, must be one of: 'mnist', 'nyu-rgb', 'nyu-depth'")
+    # print(x.shape)
     aug_x = augmentations(x)
     return aug_x
+
+def feat_aug(x):
+    augmentations = iT.Compose([
+        aT.TimeMasking(time_mask_param=10, p=0.2, iid_masks=True),  # apply time masking
+        aT.FrequencyMasking(freq_mask_param=4, iid_masks=True),  # apply frequency masking
+        iT.GaussianNoise(mean= 0.0, sigma= 0.1, clip=False),
+    ])
+    return augmentations(x)
+
 
 def audio_aug(x):
     """
@@ -81,8 +123,8 @@ def augmenter(batch, modality, device):
     elif modality == 'image+depth':
         batch1, batch2 = [image_aug(batch[0], type='nyu-rgb').to(device), image_aug(batch[1], type='nyu-depth').to(device)], [image_aug(batch[0], type='nyu-rgb').to(device), image_aug(batch[1], type='nyu-depth').to(device)],
     elif modality == 'image_ft+audio_ft+text':
-        batch1 = [audio_aug(batch[i]).to(device) for i in range(3)]
-        batch2 = [audio_aug(batch[i]).to(device) for i in range(3)]
+        batch1 = [feat_aug(batch[i]).to(device) for i in range(3)]
+        batch2 = [feat_aug(batch[i]).to(device) for i in range(3)]
     else:
         raise ValueError("Invalid aug")
     batch = [b.to('cpu') for b in batch] if not torch.is_tensor(batch) else batch.to('cpu') 
