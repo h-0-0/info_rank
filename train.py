@@ -14,27 +14,7 @@ import os
 from model import FusionModel, LinearClassifier, ImageModel, AudioModel, ResNet101, SegClassifier, ResNet50, MosiFusion, MoseiFusion, Regression, FullConvNet, FCN_SegHead
 from loss import SimCLR_loss, info_critic, info_critic_plus, prob_loss, decomposed_loss, get_train_accuracy, augmenter
 
-def supervised_train(model, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality='image+audio', classifier_type='linear_10'):
-    if 'linear' in classifier_type:
-        _, num_classes = classifier_type.split('_')
-        num_classes = int(num_classes)
-        classifier = LinearClassifier(model.output_dim, num_classes)
-        classifier = MyDataParallel(classifier)
-        classifier = classifier.to(device)
-        criterion = nn.CrossEntropyLoss()
-    elif 'seg' in classifier_type:
-        _, num_classes = classifier_type.split('_')
-        num_classes = int(num_classes)
-        classifier = SegClassifier(num_classes)
-        classifier = MyDataParallel(classifier)
-        classifier = classifier.to(device)
-        criterion = nn.CrossEntropyLoss()
-    elif classifier_type == 'regr':
-        classifier = Regression(model.output_dim)
-        classifier = MyDataParallel(classifier)
-        classifier = classifier.to(device)
-        criterion = nn.MSELoss()
-
+def supervised_train(model, classifier, criterion, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality='image+audio', classifier_type='linear_10'):
     # Set-up for training
     best_loss = float('inf') # For early stopping
     patience_counter = 0 # For early stopping
@@ -392,13 +372,13 @@ def train(**kwargs):
     # If we want to do supervised training, otherwise continue on to unsupervised training
     if est == "supervised" :
         if benchmark == "nyu_v2_13" or benchmark == "nyu_v2_40":
-            model, classifier = supervised_train(model, classifier, optimizer, eval_train_loader, device, writer, saver, num_epochs, patience, modality=modality)
+            model, classifier = supervised_train(model, classifier, criterion, optimizer, eval_train_loader, device, writer, saver, num_epochs, patience, modality=modality)
             train_loader = eval_train_loader
         elif benchmark == "mosi" or benchmark == "mosei":
-            model, classifier = supervised_train(model, classifier, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality)
+            model, classifier = supervised_train(model, classifier, criterion, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality)
             model, classifier = eval_train(model, classifier, criterion, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality)
         elif benchmark == "written_spoken_digits":
-            model, classifier = supervised_train(model, classifier, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality)
+            model, classifier = supervised_train(model, classifier, criterion, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality)
         test(model, classifier, test_loader, device, writer, saver, name='test', modality=modality)
         test(model, classifier, train_loader, device, writer, saver, name='train', modality=modality)
         saver.save_collated()
