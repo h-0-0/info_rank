@@ -59,15 +59,15 @@ def image_aug(x, type='mnist'):
             iT.RandomRotation(50),
             iT.RandomHorizontalFlip(p=0.5),
             iT.RandomVerticalFlip(p=0.5),
-            iT.RandomResizedCrop((240, 320), scale=(0.08, 1.0), antialias=True),
-            iT.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+            iT.RandomResizedCrop((240, 320), scale=(0.8, 1.0), antialias=True),
+            iT.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
         ])
     elif type == 'nyu-depth':
         augmentations = iT.Compose([
             iT.RandomRotation(50),
             iT.RandomHorizontalFlip(p=0.5),
             iT.RandomVerticalFlip(p=0.5),
-            iT.RandomResizedCrop((240, 320), scale=(0.08, 1.0), antialias=True),
+            iT.RandomResizedCrop((240, 320), scale=(0.8, 1.0), antialias=True),
         ])
     else:
         raise ValueError("Invalid type, must be one of: 'mnist', 'nyu-rgb', 'nyu-depth'")
