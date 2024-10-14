@@ -271,3 +271,69 @@ def get_torchmetrics(modality, num_classes, device):
     else:
         raise ValueError("Invalid modality")
     return metrics
+
+from model import FusionModel, ImageModel, AudioModel, ResNet101, ResNet50, FullConvNet, MosiFusion, MoseiFusion
+def get_model(model, output_dim):
+    if model == "FusionModel":
+        model = FusionModel(output_dim=output_dim)
+        modality = 'image+audio'
+    elif model == "ImageOnly":
+        model = ImageModel(output_dim=output_dim)
+        modality = 'image'
+    elif model == "AudioOnly":
+        model = AudioModel(output_dim=output_dim)
+        modality = 'audio'
+    elif model == "ResNet101":
+        model = ResNet101(output_dim=output_dim)
+        modality = 'image+depth'
+    elif model == "ResNet50":
+        model = ResNet50(output_dim=output_dim)
+        modality = 'image+depth'
+    elif model == "FCN50":
+        model = FullConvNet(resnet='resnet50')
+        modality = 'image+depth'
+    elif model == "MosiFusion":
+        model = MosiFusion(output_dim=output_dim)
+        modality = 'image_ft+audio_ft+text'
+    elif model == "MoseiFusion":
+        model = MoseiFusion(output_dim=output_dim)
+        modality = 'image_ft+audio_ft+text'
+    else:
+        raise ValueError("Invalid model")
+    return model, modality
+
+from model import LinearClassifier, SegClassifier, Regression, FCN_SegHead
+def get_classifier_criterion(model_name, output_dim, benchmark):
+    if model_name in ["FusionModel", "ImageOnly", "AudioOnly"]:
+        num_classes = 10
+        classifier = LinearClassifier(output_dim, num_classes)
+        criterion = nn.CrossEntropyLoss()
+    elif model_name in ["ResNet101", "ResNet50"]:
+        if benchmark == 'nyu_v2_13':
+            num_classes = 14
+        elif benchmark == 'nyu_v2_40':
+            num_classes = 41
+        else:
+            raise ValueError("Invalid benchmark and model combination")
+        classifier = SegClassifier(num_classes)
+        criterion = nn.CrossEntropyLoss()
+    elif model_name in ["MosiFusion", "MoseiFusion"]:
+        classifier = Regression(output_dim)
+        criterion = nn.MSELoss()
+    elif model_name == "FCN50":
+        if benchmark == 'nyu_v2_13':
+            num_classes = 14
+        elif benchmark == 'nyu_v2_40':
+            num_classes = 41
+        classifier = FCN_SegHead(num_classes, resnet='resnet50')
+        criterion = nn.CrossEntropyLoss()
+    elif model_name == "FCN101":
+        if benchmark == 'nyu_v2_13':
+            num_classes = 14
+        elif benchmark == 'nyu_v2_40':
+            num_classes = 41
+        classifier = FCN_SegHead(num_classes, resnet='resnet101')
+        criterion = nn.CrossEntropyLoss()
+    else:
+        raise ValueError("Invalid model name")
+    return classifier, criterion

@@ -271,6 +271,85 @@ class ResNet50(nn.Module):
         concat = torch.cat((u, v), dim=1)
         return self.critic(concat)
 
+class FullConvNet(nn.Module):
+    def __init__(self, resnet='resnet50'):
+        super(FullConvNet, self).__init__()
+        if resnet == 'resnet50':
+            model_name = 'fcn_resnet50'
+        elif resnet == 'resnet101':
+            model_name = 'fcn_resnet101'
+        self.encode_batch = True # When True loss function can be applied to encoded modalities
+        self.output_dim = 2048
+        fcn = torch.hub.load('pytorch/vision:v0.10.0', model_name, weights=False)
+        
+        self.backbone = fcn.backbone
+        self.backbone.conv1 = nn.Identity()
+        self.rgb_conv = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.depth_conv = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.fusion_net = nn.Sequential(
+            nn.Conv2d(2048*2, 2048, kernel_size=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=4),
+            nn.Conv2d(2048, 1024, kernel_size=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=3),
+            nn.Flatten(),
+            nn.Linear(6144, 2048),
+        )
+        self.critic = nn.Sequential(
+            nn.Linear(2048*2, 4),
+        )
+
+    def forward(self, x):
+        x_rgb, x_depth = x
+
+        x_rgb = self.rgb_conv(x_rgb)
+        x_rgb = self.backbone(x_rgb)['out']
+
+        x_depth = self.depth_conv(x_depth)
+        x_depth = self.backbone(x_depth)['out']
+
+        x = torch.cat((x_rgb, x_depth), dim=1)
+        x = self.fusion_net(x)
+        return x
+    
+    def encode_modalities(self, x):
+        x_rgb, x_depth = x
+  
+        x_rgb = self.rgb_conv(x_rgb)
+        x_rgb = self.backbone(x_rgb)['out']
+
+        x_depth = self.depth_conv(x_depth)
+        x_depth = self.backbone(x_depth)['out']
+
+        return [x_rgb, x_depth]
+    
+    def fuse(self, x):
+        x_rgb, x_depth = x 
+        x = torch.cat((x_rgb, x_depth), dim=1)
+        x = self.fusion_net(x)
+        return x
+    
+    def score(self, u, v):
+        concat = torch.cat((u, v), dim=1)
+        return self.critic(concat)
+    
+class FCN_SegHead(nn.Module):
+    def __init__(self, num_classes, resnet='resnet50'):
+        super(FCN_SegHead, self).__init__()
+        self.num_classes = num_classes
+        if resnet == 'resnet50':
+            model_name = 'fcn_resnet50'
+        elif resnet == 'resnet101':
+            model_name = 'fcn_resnet101'
+        fcn = torch.hub.load('pytorch/vision:v0.10.0', model_name, pretrained=False)
+        self.classifier = fcn.classifier
+
+    def forward(self, x):
+        x = self.classifier(x)
+        return x
+
+        
 
 class SegClassifier(nn.Module):
     """ To be used for segmentation tasks with ResNetSegmentation. """
