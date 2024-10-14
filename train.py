@@ -8,10 +8,10 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 from tensorboardX import SummaryWriter
-from utils import MyDataParallel, log_memory, get_batch_labels, get_torchmetrics
+from utils import MyDataParallel, log_memory, get_batch_labels, get_torchmetrics, get_model, get_classifier_criterion
 import slune
 import os
-from model import FusionModel, LinearClassifier, ImageModel, AudioModel, ResNet101, SegClassifier, ResNet50, MosiFusion, MoseiFusion, Regression
+from model import FusionModel, LinearClassifier, ImageModel, AudioModel, ResNet101, SegClassifier, ResNet50, MosiFusion, MoseiFusion, Regression, FullConvNet, FCN_SegHead
 from loss import SimCLR_loss, info_critic, info_critic_plus, prob_loss, decomposed_loss, get_train_accuracy, augmenter
 
 def supervised_train(model, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality='image+audio', classifier_type='linear_10'):
@@ -200,28 +200,7 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
                 break
     return model
             
-def eval_train(model, optimizer, train_loader, device, writer, saver, lr, num_epochs, patience, modality='image+audio', classifier_type='linear_10'):
-    # Define the linear classifier
-    # Find output size of network
-    if 'linear' in classifier_type:
-        _, num_classes = classifier_type.split('_')
-        num_classes = int(num_classes)
-        classifier = LinearClassifier(model.output_dim, num_classes)
-        classifier = MyDataParallel(classifier)
-        classifier = classifier.to(device)
-        criterion = nn.CrossEntropyLoss()
-    elif 'seg' in classifier_type:
-        _, num_classes = classifier_type.split('_')
-        num_classes = int(num_classes)
-        classifier = SegClassifier(num_classes)
-        classifier = MyDataParallel(classifier)
-        classifier = classifier.to(device)
-        criterion = nn.CrossEntropyLoss()
-    elif classifier_type == 'regr':
-        classifier = Regression(model.output_dim)
-        classifier = MyDataParallel(classifier)
-        classifier = classifier.to(device)
-        criterion = nn.MSELoss()
+def eval_train(model, classifier, criterion, optimizer, train_loader, device, writer, saver, lr, num_epochs, patience, modality='image+audio'):
     optimizer = optim.SGD(classifier.parameters(), lr=lr)
     for param in model.parameters():
         param.requires_grad = False
@@ -398,37 +377,11 @@ def train(**kwargs):
     else:
         raise ValueError("Invalid benchmark: {}".format(benchmark))
     
-    if model == "FusionModel":
-        model = FusionModel(output_dim=output_dim)
-        modality = 'image+audio'
-        classifier_type = 'linear_10'
-    elif model == "ImageOnly":
-        model = ImageModel(output_dim=output_dim)
-        modality = 'image'
-        classifier_type = 'linear_10'
-    elif model == "AudioOnly":
-        model = AudioModel(output_dim=output_dim)
-        modality = 'audio'
-        classifier_type = 'linear_10'
-    elif model == "ResNet101":
-        model = ResNet101(output_dim=output_dim)
-        modality = 'image+depth'
-        classifier_type = 'seg_14' if benchmark == "nyu_v2_13" else 'seg_41'
-    elif model == "ResNet50":
-        model = ResNet50(output_dim=output_dim)
-        modality = 'image+depth'
-        classifier_type = 'seg_14' if benchmark == "nyu_v2_13" else 'seg_41'
-    elif model == "MosiFusion":
-        model = MosiFusion(output_dim=output_dim)
-        modality = 'image_ft+audio_ft+text'
-        classifier_type = 'regr'
-    elif model == "MoseiFusion":
-        model = MoseiFusion(output_dim=output_dim)
-        modality = 'image_ft+audio_ft+text'
-        classifier_type = 'regr'
-    else:
-        raise ValueError("Invalid model")
+    model_name = model
+    model, modality = get_model(model, output_dim)
+    classifier, criterion = get_classifier_criterion(model_name, model.output_dim, benchmark)
     model = model.to(device)
+    classifier = classifier.to(device)
     if optimizer == "SGD":
         optimizer = optim.SGD(model.parameters(), lr=learning_rate)
     elif optimizer == "Adam":
@@ -439,13 +392,13 @@ def train(**kwargs):
     # If we want to do supervised training, otherwise continue on to unsupervised training
     if est == "supervised" :
         if benchmark == "nyu_v2_13" or benchmark == "nyu_v2_40":
-            model, classifier = supervised_train(model, optimizer, eval_train_loader, device, writer, saver, num_epochs, patience, modality=modality, classifier_type=classifier_type)
+            model, classifier = supervised_train(model, classifier, optimizer, eval_train_loader, device, writer, saver, num_epochs, patience, modality=modality)
             train_loader = eval_train_loader
         elif benchmark == "mosi" or benchmark == "mosei":
-            model, classifier = supervised_train(model, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality, classifier_type=classifier_type)
-            model, classifier = eval_train(model, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality, classifier_type=classifier_type)
+            model, classifier = supervised_train(model, classifier, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality)
+            model, classifier = eval_train(model, classifier, criterion, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality)
         elif benchmark == "written_spoken_digits":
-            model, classifier = supervised_train(model, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality, classifier_type=classifier_type)
+            model, classifier = supervised_train(model, classifier, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality)
         test(model, classifier, test_loader, device, writer, saver, name='test', modality=modality)
         test(model, classifier, train_loader, device, writer, saver, name='train', modality=modality)
         saver.save_collated()
@@ -471,7 +424,7 @@ def train(**kwargs):
     model = unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperature, device, writer, saver, num_epochs, patience, modality=modality)
 
     # Now that we have trained the model, we evaluate it by training a linear classifier on top of the frozen representations
-    model, classifier = eval_train(model, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality, classifier_type=classifier_type)
+    model, classifier = eval_train(model, classifier, criterion, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality)
 
     # Evaluate the model on the test set
     test(model, classifier, test_loader, device, writer, saver, 'test', modality=modality)
@@ -496,8 +449,8 @@ if __name__ == "__main__":
         'est': args.est,
         'model': args.model,
         'learning_rate': 1e-3, 
-        'num_epochs': 5, #0.0003,
-        'batch_size': 40, #16
+        'num_epochs': 0.0003,
+        'batch_size': 4, #16
         'patience': 10,
         'temperature': 1,
         'output_dim': 2048,
