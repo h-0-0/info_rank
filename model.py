@@ -289,12 +289,12 @@ class FullConvNet(nn.Module):
         self.fusion_net = nn.Sequential(
             nn.Conv2d(2048*2, 2048, kernel_size=1),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=4),
-            nn.Conv2d(2048, 1024, kernel_size=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=3),
-            nn.Flatten(),
-            nn.Linear(6144, 2048),
+            # nn.MaxPool2d(kernel_size=4),
+            # nn.Conv2d(2048, 1024, kernel_size=1),
+            # nn.ReLU(),
+            # nn.MaxPool2d(kernel_size=3),
+            # nn.Flatten(),
+            nn.Linear(76800, 2048),
         )
         self.critic = nn.Sequential(
             nn.Linear(2048*2, 4),
@@ -346,6 +346,8 @@ class FCN_SegHead(nn.Module):
         self.classifier = fcn.classifier
 
     def forward(self, x):
+        # Reshape vector to (N, 2048, 1, 1)
+        x = x.unsqueeze(2).unsqueeze(3)
         x = self.classifier(x)
         return x
 
