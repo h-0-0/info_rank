@@ -342,6 +342,7 @@ def train(**kwargs):
     if benchmark == "written_spoken_digits":
         train_loader, test_loader = digits_get_data_loaders(batch_size=batch_size)
         eval_train_loader = train_loader
+        torch.autograd.set_detect_anomaly(True)
     elif benchmark == "nyu_v2_13":
         torch.backends.cudnn.benchmark = True
         train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=13, num_workers=4)
