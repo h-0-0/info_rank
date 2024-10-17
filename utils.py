@@ -292,6 +292,9 @@ def get_model(model, output_dim):
     elif model == "FCN50":
         model = FullConvNet(resnet='resnet50')
         modality = 'image+depth'
+    elif model == "FCN101":
+        model = FullConvNet(resnet='resnet101')
+        modality = 'image+depth'
     elif model == "MosiFusion":
         model = MosiFusion(output_dim=output_dim)
         modality = 'image_ft+audio_ft+text'
