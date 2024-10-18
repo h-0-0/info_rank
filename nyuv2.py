@@ -113,6 +113,11 @@ class NYUv2(Dataset):
             if isinstance(img, torch.Tensor):
                 # depth png is uint16
                 img = img.float() / 1e4
+                # Set infty to 10
+                img = torch.where(torch.isinf(img), 10.0, img)
+            elif isinstance(img, np.ndarray):
+                img = img.astype(np.float32) / 1e4
+                img = np.where(np.isinf(img), 10.0, img)
             imgs.append(img)
 
         if self.seg_transform is not None:

@@ -23,17 +23,20 @@ def set_tensorflow_not_use_gpu():
 
 rgb_transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            transforms.Normalize(mean=[0.4876, 0.4176, 0.4005], std=[0.2895, 0.2978, 0.3118]),
+            transforms.Resize((240, 320)),
         ])
 depth_transform = transforms.Compose([
-            lambda x: np.expand_dims(x, axis=-1),
+            lambda x: np.expand_dims(x, axis=-1) / 10.0, # Normalize depth values to [0, 1] and add channel dimension (like ToTensor does for RGB)
             transforms.ToTensor(),
-            transforms.ConvertImageDtype(torch.float16),
-            lambda x: torch.where(torch.isinf(x), torch.tensor(10.0), x), # Convert 'inf' to 10 
-            transforms.Normalize(mean=[2.6738], std=[1.5146]),
+            lambda x: x.to(torch.float32), # Convert to torch.float32
+            # transforms.ConvertImageDtype(torch.float16),
+            # lambda x: torch.where(torch.isinf(x), torch.tensor(10.0), x), # Convert 'inf' to 10 
+            transforms.Normalize(mean=[0.2707], std=[0.1517]),
+            transforms.Resize((240, 320)),
         ])
 
-class NyuDepthDataset(IterableDataset):
+class NyuUnsupDataset(IterableDataset):
     """
     A PyTorch Dataset for the NYU Depth V2 dataset (https://cs.nyu.edu/~fergus/datasets/nyu_depth_v2.html).
     We use the TensorFlow Datasets version of the dataset (https://www.tensorflow.org/datasets/catalog/nyu_depth_v2).
@@ -62,6 +65,8 @@ class NyuDepthDataset(IterableDataset):
         sample = next(self.data_iter)
         # Convert to PyTorch tensors
         image, depth = sample['image'], sample['depth']
+        # Set infinity to 10 in depth map
+        depth = np.where(np.isinf(depth), 10.0, depth)
         image = self.image_transform(image)
         depth = self.depth_transform(depth)
         return image, depth
@@ -99,8 +104,8 @@ def get_nyu_v2(num_classes: int):
     we will use RandomlyResizedCrop on the unsupervised set during training.
     """
     train_set, test_set = download_nyu_v2()
-    ds_train = NyuDepthDataset(train_set)
-    ds_test = NyuDepthDataset(test_set) # We dont actally use this.
+    ds_train = NyuUnsupDataset(train_set)
+    ds_test = NyuUnsupDataset(test_set) # We dont actally use this.
     
     t = transforms.Compose([transforms.ToTensor(), transforms.Resize((240, 320))])
     ds_train_supervised = NYUv2('data/NYUv2',  download=True, train=True, num_classes=num_classes,
@@ -227,7 +232,7 @@ def viz(rgb_images, depth_images, num_classes, labels=None):
 
 if __name__ == "__main__":
     num_classes = 13
-    train_loader, test_loader, train_supervised_loader, test_supervised_loader = nyu_v2_get_data_loaders(4, num_classes)
+    train_loader, test_loader, train_supervised_loader, test_supervised_loader = nyu_v2_get_data_loaders(200, num_classes)
     # Get the first batch of images and labels from the train loader and visualize them
     rgb_images, depth_images = next(iter(train_loader))
     viz(rgb_images, depth_images, num_classes)
@@ -236,8 +241,83 @@ if __name__ == "__main__":
     # print max and min values for depth images
     viz(rgb_images, depth_images, num_classes, labels=labels)
 
-    num_classes = 40
-    train_loader, test_loader, train_supervised_loader, test_supervised_loader = nyu_v2_get_data_loaders(4, num_classes)
-    # Get the first batch of images and labels from the train loader and visualize them
-    rgb_images, depth_images, labels = next(iter(train_supervised_loader))    
-    viz(rgb_images, depth_images, num_classes, labels=labels)
+    # num_classes = 40
+    # train_loader, test_loader, train_supervised_loader, test_supervised_loader = nyu_v2_get_data_loaders(4, num_classes)
+    # # Get the first batch of images and labels from the train loader and visualize them
+    # rgb_images, depth_images, labels = next(iter(train_supervised_loader))    
+    # viz(rgb_images, depth_images, num_classes, labels=labels)
+
+    # Initialize histogram bins and counts
+    rgb_bins = np.linspace(0.0, 1.0, 51)  # Assuming 8-bit RGB values
+    depth_bins = np.linspace(0.0, 1.0, 51)  # Adjust range for depth values
+    rgb_hist = np.zeros(50, dtype=np.int64)
+    depth_hist = np.zeros(50, dtype=np.int64)
+
+    # Process data in chunks
+    i = 0
+    n=0
+    max_rbg = 0
+    max_depth = 0
+    min_rbg = 255
+    min_depth = np.iinfo(np.uint16).max
+    rgb_sum = np.array([0.0, 0.0, 0.0])
+    depth_sum = 0.0
+    rgb_sum_sq = np.array([0.0, 0.0, 0.0])
+    depth_sum_sq = 0.0
+    for rgb, depth, label in test_supervised_loader:
+        i += 1
+        n += rgb.shape[0] * rgb.shape[2] * rgb.shape[3]
+        # Calculate mean and std
+        rgb_sum += rgb.sum((0,2,3)).numpy()
+        depth_sum += depth.sum((0,2,3)).numpy()
+        rgb_sum_sq += (rgb**2).sum((0,2,3)).numpy()
+        depth_sum_sq += (depth**2).sum((0,2,3)).numpy()
+        
+        # Process RGB data
+        rgb_flat = rgb.numpy().flatten()
+        rgb_chunk_hist, _ = np.histogram(rgb_flat, bins=rgb_bins)
+        rgb_hist += rgb_chunk_hist
+        
+        # Process depth data
+        depth_flat = depth.numpy().flatten()
+        depth_chunk_hist, _ = np.histogram(depth_flat, bins=depth_bins)
+        depth_hist += depth_chunk_hist
+
+        if rgb_flat.max() > max_rbg:
+            max_rbg = rgb_flat.max()
+        if depth_flat.max() > max_depth:
+            max_depth = depth_flat.max()
+        if rgb_flat.min() < min_rbg:
+            min_rbg = rgb_flat.min()
+        if depth_flat.min() < min_depth:
+            min_depth = depth_flat.min()
+
+    print(f'Max RGB: {max_rbg}, Min RGB: {min_rbg}')
+    print(f'Max Depth: {max_depth}, Min Depth: {min_depth}')
+    rgb_mean = rgb_sum / n
+    depth_mean = depth_sum / n
+    
+    rgb_sum_sq = rgb_sum_sq / n
+    depth_sum_sq = depth_sum_sq / n
+    print("rgb_sum_sq", rgb_sum_sq)
+    print("depth_sum_sq", depth_sum_sq)
+    rgb_std = np.sqrt(rgb_sum_sq - (rgb_mean**2))
+    depth_std = np.sqrt(depth_sum_sq  - (depth_mean**2))
+    print(f'RGB mean: {rgb_mean}, RGB std: {rgb_std}')
+    print(f'Depth mean: {depth_mean}, Depth std: {depth_std}')
+
+    # Plot histograms
+    fig, ax = plt.subplots(1, 2, figsize=(12, 6))
+
+    ax[0].bar(rgb_bins[:-1], rgb_hist, width=np.diff(rgb_bins), align='edge', color='blue', alpha=0.7)
+    ax[0].set_title('RGB Image Pixel Values')
+    ax[0].set_xlabel('Pixel Value')
+    ax[0].set_ylabel('Frequency')
+
+    ax[1].bar(depth_bins[:-1], depth_hist, width=np.diff(depth_bins), align='edge', color='red', alpha=0.7)
+    ax[1].set_title('Depth Image Pixel Values')
+    ax[1].set_xlabel('Pixel Value')
+    ax[1].set_ylabel('Frequency')
+
+    plt.tight_layout()
+    plt.savefig('viz/nyu_v2/histograms.png')
