@@ -1,3 +1,5 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from torch.utils.data import DataLoader, Dataset, IterableDataset
 import tensorflow_datasets as tfds
 import torch
@@ -131,6 +133,9 @@ def nyu_v2_get_data_loaders(batch_size: int, num_classes: int, num_workers: int 
         train_loader: The data loader for the train set.
         test_loader: The data loader for the test set.
     """
+    from tensorflow import compat
+    compat.v1.logging.set_verbosity(compat.v1.logging.WARN) # Suppress TensorFlow warnings
+    compat.v1.logging.set_verbosity(compat.v1.logging.ERROR) # Suppress TensorFlow warnings
     ds_train, ds_test, ds_train_supervised, ds_test_supervised = get_nyu_v2(num_classes)
 
     # these dont need shuffling (handled through tdfs)
