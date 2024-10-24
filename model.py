@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
-from torchvision import models
+from torchvision import models, transforms
 
 class MNIST_Image_CNN(nn.Module):
     def __init__(self, output_dim=64):
@@ -287,14 +287,22 @@ class FullConvNet(nn.Module):
         self.rgb_conv = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.depth_conv = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.fusion_net = nn.Sequential(
-            nn.Conv2d(2048*2, 2048, kernel_size=1),
+            nn.Conv2d(2048*2, 1024, kernel_size=1),
             nn.ReLU(),
-            # nn.MaxPool2d(kernel_size=4),
-            # nn.Conv2d(2048, 1024, kernel_size=1),
-            # nn.ReLU(),
-            # nn.MaxPool2d(kernel_size=3),
+            nn.MaxPool2d(kernel_size=2),
+            nn.Conv2d(1024, 256, kernel_size=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+            nn.Conv2d(256, 64, kernel_size=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
             # nn.Flatten(),
-            nn.Linear(76800, 2048),
+            transforms.CenterCrop((240, 320)),
+            # nn.Linear(84000, 2048),
+        )
+        self.fusion_linear_projection = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(76800, 2048)
         )
         self.critic = nn.Sequential(
             nn.Linear(2048*2, 4),
@@ -311,6 +319,7 @@ class FullConvNet(nn.Module):
 
         x = torch.cat((x_rgb, x_depth), dim=1)
         x = self.fusion_net(x)
+        x = self.fusion_linear_projection(x)
         return x
     
     def encode_modalities(self, x):
@@ -328,6 +337,7 @@ class FullConvNet(nn.Module):
         x_rgb, x_depth = x 
         x = torch.cat((x_rgb, x_depth), dim=1)
         x = self.fusion_net(x)
+        x = self.fusion_linear_projection(x)
         return x
     
     def score(self, u, v):
