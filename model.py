@@ -404,7 +404,7 @@ class MosiFusion(nn.Module):
     Consists of three GRU encoders for vision, audio and text modalities.
     The output of each encoder is concatenated and passed through an MLP.
     """
-    def __init__(self, output_dim=64):
+    def __init__(self, output_dim=64, attention=False):
         super(MosiFusion, self).__init__()
 
         self.output_dim = output_dim
@@ -447,13 +447,16 @@ class MosiFusion(nn.Module):
         #     nn.Linear(hidden_size, self.output_dim)
         # )
 
-        self.fusion_mlp = nn.Sequential(
-            nn.ReLU(),
-            nn.Linear(hidden_size*3, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, self.output_dim),
-        )
-
+        self.fusion_mlp = nn.Sequential()
+        if attention:
+            encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size*3, nhead=3)
+            self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
+            self.fusion_mlp.add_module('attention', self.transformer_encoder)
+        self.fusion_mlp.add_module('relu', nn.ReLU())
+        self.fusion_mlp.add_module('linear_1', nn.Linear(hidden_size*3, hidden_size))
+        self.fusion_mlp.add_module('relu', nn.ReLU())
+        self.fusion_mlp.add_module('linear_2', nn.Linear(hidden_size, self.output_dim))
+       
         # self.fusion_mlp = nn.Sequential(
         #     nn.BatchNorm1d(hidden_size*3),
         #     nn.ReLU(),
