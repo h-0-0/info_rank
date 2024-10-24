@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List
 import torchvision.transforms as T
+from matplotlib import pyplot as plt
 
 def _padding(inputs: List):
     """
@@ -35,14 +36,6 @@ def _padding(inputs: List):
             labels.append(sample[-1])
 
     return processed_input[0], processed_input[1], processed_input[2], torch.tensor(labels).view(len(inputs), 1)
-
-def _get_MultiBench():
-    if not os.path.exists('MultiBench'):
-        # Clone Multi Bench
-        subprocess.run("git clone git@github.com:pliang279/MultiBench.git", shell = True, executable="/bin/bash")
-        print("Cloned MultiBench")
-    else:
-        print("MultiBench already downloaded")
 
 def _download_mosi():
     if not os.path.exists('data/mosi'):
@@ -104,7 +97,6 @@ def _process_mosi(viz=True):
 
     if viz:
         # Plot and save histogram of values for each modality for train split
-        from matplotlib import pyplot as plt
         if not os.path.exists("viz/mosi"):
             os.makedirs("viz/mosi")
         for modality in ['vision', 'audio', 'text']:
@@ -248,19 +240,7 @@ class MOSI_MOSEI(Dataset):
 def get_mosi(batch_size=32, train_shuffle=True):
     _download_mosi()
     processed_dataset = _process_mosi()
-    # _get_MultiBench() # TODO REMOVE
-    # sys.path.append(os.path.join(os.path.dirname(__file__), 'MultiBench')) # MultiBench doesnt have __init__.py so we need to add the path manually
-    # from MultiBench.datasets.affect.get_data import get_dataloader
-    # train_loader, valid_loader, test_loader = get_dataloader(
-    #     'data/mosi/mosi_raw.pkl', 
-    #     data_type='mosi', 
-    #     max_pad=True, 
-    #     max_seq_len=50,
-    #     batch_size=batch_size,
-    #     train_shuffle=train_shuffle,
-    #     z_norm=False,
-    #     num_workers=1
-    #     )
+
     mosi_vision_norm = lambda x: (x - -0.260075) / 1.29176
     mosi_audio_norm = lambda x: (x - 0.710609) / 12.2957
     mosi_text_norm = lambda x: (x - -0.0006965) / 0.1557696
@@ -283,20 +263,8 @@ def get_mosi(batch_size=32, train_shuffle=True):
 
 def get_mosei(batch_size=32, train_shuffle=True):
     _download_mosei()
-    # _get_MultiBench() # TODO REMOVE
     processed_dataset = _process_mosei()
-    # sys.path.append(os.path.join(os.path.dirname(__file__), 'MultiBench')) # MultiBench doesnt have __init__.py so we need to add the path manually
-    # from MultiBench.datasets.affect.get_data import get_dataloader
-    # train_loader, valid_loader, test_loader = get_dataloader(
-    #     'data/mosei/mosei_raw_clean.pkl', 
-    #     data_type='mosei', 
-    #     max_pad=True, 
-    #     max_seq_len=50,
-    #     batch_size=batch_size,
-    #     train_shuffle=train_shuffle,
-    #     z_norm=False,
-    #     num_workers=1
-    #     ) #TODO REMOVE
+
     mosei_vision_norm = lambda x: (x - 106.02776) / 256.87140
     mosei_audio_norm = lambda x: (x - 1.1677283) / 15.1068355
     mosei_text_norm = lambda x: (x - 0.0004857003) / 0.2076894670
@@ -367,10 +335,13 @@ def viz(mosi_or_mosei, batch):
         fig.colorbar(cax, ax=axs[i])
     plt.savefig(f"viz/{mosi_or_mosei}/text.png")
 
-    # Now let's visualize the labels as a histogram, bins are from -3 to 3 (7 classes)
-    plt.hist(label, bins=np.arange(-3.5, 4.5, 1))
-    plt.title("Labels")
-    plt.savefig(f"viz/{mosi_or_mosei}/labels.png")
+def viz_hist(mosi_or_mosei, data, type):
+    # Now let's visualize the labels as a histogram, bins are from -3 to 3 (7 classes), with 20 bins
+    fig, ax = plt.subplots()
+    data = data.flatten()
+    ax.hist(data, bins=25)
+    ax.set_title(f"{type}")
+    plt.savefig(f"viz/{mosi_or_mosei}/hist_{type}.png")
 
 
 def mosi_get_data_loaders(batch_size):
@@ -397,9 +368,17 @@ if __name__ == "__main__":
     # Let's visualize some of the training data
     batch = next(iter(train_loader))
     viz('mosi', batch)
+    viz_hist('mosi', train_loader.dataset.dataset['vision'], 'vision')
+    viz_hist('mosi', train_loader.dataset.dataset['audio'], 'audio')
+    viz_hist('mosi', train_loader.dataset.dataset['text'], 'text')
+    viz_hist('mosi', train_loader.dataset.dataset['labels'], 'labels')
 
     # # Now for MOSEI
     train_loader, valid_loader, test_loader = mosei_get_data_loaders(n_batch) 
     # Let's visualize some of the training data
     batch = next(iter(train_loader))
     viz('mosei', batch)
+    viz_hist('mosei', train_loader.dataset.dataset['vision'], 'vision')
+    viz_hist('mosei', train_loader.dataset.dataset['audio'], 'audio')
+    viz_hist('mosei', train_loader.dataset.dataset['text'], 'text')
+    viz_hist('mosei', train_loader.dataset.dataset['labels'], 'labels')
