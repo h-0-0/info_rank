@@ -1,4 +1,4 @@
-from data_digits import digits_get_data_loaders
+from data_digits import digits_get_data_loaders, digits_get_data_loaders_weak_modality
 from data_nyu_v2 import nyu_v2_get_data_loaders
 from data_mosi_mosei import mosi_get_data_loaders, mosei_get_data_loaders
 import torch
@@ -14,7 +14,11 @@ import os
 from model import FusionModel, LinearClassifier, ImageModel, AudioModel, ResNet101, SegClassifier, ResNet50, MosiFusion, MoseiFusion, Regression, FullConvNet, FCN_SegHead
 from loss import SimCLR_loss, info_critic, info_critic_plus, prob_loss, decomposed_loss, get_train_accuracy, augmenter
 
-def supervised_train(model, classifier, criterion, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality='image+audio', classifier_type='linear_10'):
+def supervised_train(model, classifier, criterion, train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality='image+audio', optimizer_type='SGD'):
+    if optimizer_type == 'SGD':
+        optimizer = optim.SGD(list(model.parameters()) + list(classifier.parameters()), lr=learning_rate)
+    elif optimizer_type == 'Adam':
+        optimizer = optim.Adam(list(model.parameters()) + list(classifier.parameters()), lr=learning_rate)
     # Set-up for training
     best_loss = float('inf') # For early stopping
     patience_counter = 0 # For early stopping
@@ -313,6 +317,8 @@ def train(**kwargs):
     """
     # Unpack the config
     benchmark = kwargs['benchmark']
+    if benchmark == "written_spoken_digits_weak_image" or benchmark == "written_spoken_digits_weak_audio":
+        sigma = kwargs.get('sigma', 0.1)
     model = kwargs['model']
     learning_rate = kwargs['learning_rate']
     num_epochs = kwargs['num_epochs']
@@ -342,7 +348,12 @@ def train(**kwargs):
     if benchmark == "written_spoken_digits":
         train_loader, test_loader = digits_get_data_loaders(batch_size=batch_size)
         eval_train_loader = train_loader
-        torch.autograd.set_detect_anomaly(True)
+    elif benchmark == "written_spoken_digits_weak_image":
+        train_loader, test_loader = digits_get_data_loaders_weak_modality(batch_size=batch_size, sigma=sigma, weaken_image=True)
+        eval_train_loader = train_loader
+    elif benchmark == "written_spoken_digits_weak_audio":
+        train_loader, test_loader = digits_get_data_loaders_weak_modality(batch_size=batch_size, sigma=sigma, weaken_audio=True)
+        eval_train_loader = train_loader
     elif benchmark == "nyu_v2_13":
         torch.backends.cudnn.benchmark = True
         train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=13, num_workers=4)
@@ -352,6 +363,7 @@ def train(**kwargs):
     elif benchmark == "mosi":
         train_loader, val_loader, test_loader = mosi_get_data_loaders(batch_size=batch_size)
         eval_train_loader = val_loader
+        torch.autograd.detect_anomaly(True)
     elif benchmark == "mosei":
         train_loader, val_loader, test_loader = mosei_get_data_loaders(batch_size=batch_size)
         eval_train_loader = val_loader
@@ -364,8 +376,10 @@ def train(**kwargs):
     model = model.to(device)
     classifier = classifier.to(device)
     if optimizer == "SGD":
+        optimizer_type = "SGD"
         optimizer = optim.SGD(model.parameters(), lr=learning_rate)
     elif optimizer == "Adam":
+        optimizer_type = "Adam"
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     else:
         raise ValueError("Invalid optimizer")
@@ -373,13 +387,16 @@ def train(**kwargs):
     # If we want to do supervised training, otherwise continue on to unsupervised training
     if est == "supervised" :
         if benchmark == "nyu_v2_13" or benchmark == "nyu_v2_40":
-            model, classifier = supervised_train(model, classifier, criterion, optimizer, eval_train_loader, device, writer, saver, num_epochs, patience, modality=modality)
+            model, classifier = supervised_train(model, classifier, criterion, eval_train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type)
             train_loader = eval_train_loader
         elif benchmark == "mosi" or benchmark == "mosei":
-            model, classifier = supervised_train(model, classifier, criterion, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality)
+            model, classifier = supervised_train(model, classifier, criterion, train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type)
+            classifier, criterion = get_classifier_criterion(model_name, model.output_dim, benchmark)
+            classifier = classifier.to(device)
             model, classifier = eval_train(model, classifier, criterion, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality)
+            test(model, classifier, train_loader, device, writer, saver, name='valid', modality=modality)
         elif benchmark == "written_spoken_digits":
-            model, classifier = supervised_train(model, classifier, criterion, optimizer, train_loader, device, writer, saver, num_epochs, patience, modality=modality)
+            model, classifier = supervised_train(model, classifier, criterion, train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type)
         test(model, classifier, test_loader, device, writer, saver, name='test', modality=modality)
         test(model, classifier, train_loader, device, writer, saver, name='train', modality=modality)
         saver.save_collated()
@@ -431,10 +448,10 @@ if __name__ == "__main__":
         'model': args.model,
         'learning_rate': 1e-3, 
         'num_epochs': 0.0003,
-        'batch_size': 4, #16
+        'batch_size': 128, #16
         'patience': 10,
         'temperature': 1,
-        'output_dim': 2048,
+        'output_dim': 128,
         'optimizer': 'SGD',
         'eval_num_epochs': 10,
     }
