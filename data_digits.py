@@ -46,7 +46,7 @@ def order_reduce_mnist(data, target, train=True):
         target = np.delete(target, idx, axis=0)
     return data, target
 
-def get_ImageMNIST() -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset]:     
+def get_ImageMNIST(sigma=0) -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset]:     
     """ 
     Downloads the MNIST dataset (https://github.com/pytorch/vision/blob/master/torchvision/datasets/mnist.py).
     Returns the train and test set, with normalization transform applied.
@@ -70,8 +70,12 @@ def get_ImageMNIST() -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset
     test_data = test_data[:,:,:, np.newaxis]
     # Apply transform to training and test set
     train_data = torch.stack([transform(d) for d in train_data])
+    if sigma > 0:
+        train_data += torch.randn(train_data.shape) * sigma
     train_targets = torch.tensor(train_targets, dtype=torch.long)
     test_data = torch.stack([transform(d) for d in test_data])
+    if sigma > 0:
+        test_data += torch.randn(test_data.shape) * sigma
     test_targets = torch.tensor(test_targets, dtype=torch.long)
     
     return train_data, train_targets, test_data, test_targets
@@ -139,10 +143,13 @@ def min_max_normalization(tensor):
     normalized_tensor = (tensor - min_val) / (max_val - min_val + 1e-8)
     return normalized_tensor
 
-def get_AudioMNIST() -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset]:
+def get_AudioMNIST(sigma=0) -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset]:
     """
     Checks if the AudioMNIST dataset (https://github.com/soerenab/AudioMNIST) is downloaded and processed, returns it if it is.
     If it isn't then will download it, split into a train and test set and for each; create two tensors, one for the audio and one for the labels, process the audio into MFCCs and save them as a pytorch dataset.
+
+    Args:
+        - sigma (float): The variance of the (zero mean) gaussian noise to add to the audio
 
     Returns:
         - train_dataset (torch.utils.data.Dataset): The training dataset
@@ -179,13 +186,16 @@ def get_AudioMNIST() -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset
     # trans = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True)]) #TODO Remove
     trans = transforms.Compose([transforms.ToTensor()])
     
-    train_data = min_max_normalization(train_data)
+    # train_data = min_max_normalization(train_data)
     train_data = torch.stack([trans(d) for d in train_data])
+    if sigma > 0:
+        train_data += torch.randn(train_data.shape) * sigma
 
     train_labels = torch.tensor(train_labels, dtype=torch.long)
-
-    test_data = min_max_normalization(test_data)
+    # test_data = min_max_normalization(test_data)
     test_data = torch.stack([trans(d) for d in test_data])
+    if sigma > 0:
+        test_data += torch.randn(test_data.shape) * sigma
     
     test_labels = torch.tensor(test_labels, dtype=torch.long)
 
@@ -221,6 +231,46 @@ def digits_get_data_loaders(batch_size):
     # Save the datasets
     # torch.save(train_data, 'data/digits_train_data.pt')
     # torch.save(test_data, 'data/digits_test_data.pt')
+
+    train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
+    test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=True)
+    return train_loader, test_loader
+
+def digits_get_data_loaders_weak_modality(batch_size, sigma, weaken_audio=False, weaken_image=False):
+    """
+    Returns the train and test data loaders for the bi-modal dataset consisting of spoken mnist (audio) and written mnist (images).
+    The data is split into a train and test set, with each set containing 30000 and 4000 samples respectfully.
+    If weaken_audio is True then the audio data will be weakened by adding zero mean variance sigma gaussian noise to it.
+    If weaken_image is True then the image data will be weakened by adding zero mean variance sigma gaussian noise to it.
+
+    Args:
+        - batch_size (int): The batch size
+        - sigma (float): The variance of the gaussian noise to add to the data
+        - weaken_audio (bool): Whether to weaken the audio data
+        - weaken_image (bool): Whether to weaken the image data
+
+    Returns:
+        - train_loader (torch.utils.data.DataLoader): The training data loader
+        - test_loader (torch.utils.data.DataLoader): The test data loader
+
+    """  
+    if (not weaken_audio) and (not weaken_image):
+        print("No weakening applied")
+        return digits_get_data_loaders(batch_size)
+    # Check if datasets exist and load them if they do
+    if not (sigma > 0):
+        raise ValueError("Sigma must be greater than 0 if weakening is applied")
+    audio_sigma = sigma if weaken_audio else 0
+    image_sigma = sigma if weaken_image else 0
+
+    audio_train_data, audio_train_labels, audio_test_data, audio_test_labels = get_AudioMNIST(sigma=audio_sigma)
+    images_train_data, images_train_labels, images_test_data, images_test_labels = get_ImageMNIST(sigma=image_sigma)
+    assert (audio_train_labels == images_train_labels).all()
+    assert (audio_test_labels == images_test_labels).all()
+    # Combine training sets so that we match images and audio samples according to label
+    train_data = torch.utils.data.TensorDataset(images_train_data, audio_train_data, images_train_labels)
+    # Combine test sets so that we match images and audio samples according to label
+    test_data = torch.utils.data.TensorDataset(images_test_data, audio_test_data, images_test_labels)
 
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
     test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=True)
