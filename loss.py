@@ -77,9 +77,9 @@ def image_aug(x, type='mnist'):
 
 def feat_aug(x):
     augmentations = iT.Compose([
-        aT.TimeMasking(time_mask_param=10, p=0.2, iid_masks=True),  # apply time masking
-        aT.FrequencyMasking(freq_mask_param=4, iid_masks=True),  # apply frequency masking
-        iT.GaussianNoise(mean=0.0, sigma=0.2, clip=False),
+        aT.TimeMasking(time_mask_param=10, p=0.15, iid_masks=False),  # apply time masking
+        aT.FrequencyMasking(freq_mask_param=4, iid_masks=False),  # apply frequency masking
+        iT.GaussianNoise(mean=0.0, sigma=0.1, clip=False),
     ])
     return augmentations(x)
 
