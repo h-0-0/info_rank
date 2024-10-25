@@ -3,39 +3,79 @@ import slune
 if  __name__ == "__main__":
     to_search = {
         'benchmark': ['mosi'],
-        'model': ['MosiFusion'],
-        'num_epochs': [300],
         'batch_size': [128],
-        'patience': [20],
+        'patience': [500],
 
         'optimizer': ['SGD'],
-
-        'eval_num_epochs': [300],
-        'eval_lr': [1e-1],
-        'eval_patience': [30],
     }
     SimCLR = {
         'est': ['SimCLR'],
-        'learning_rate': [5e-2, 1e-2, 1e-3, 1e-4],
+        'model': ['MosiFusion', 'MosiFusionAttention'],
+        'learning_rate': [1e-3, 5e-4, 1e-4],
         'temperature': [1], 
-        'output_dim': [64, 128, 256, 512, 1024],
+        'output_dim': [64, 128, 256],
+        'num_epochs': [300],
+        'eval_num_epochs': [200],
+        'eval_patience': [50],
+    }
+    SimCLR_MISA = {
+        'est': ['SimCLR'],
+        'model': ['MosiMISA'],
+        'learning_rate': [1e-2, 5e-3, 1e-3, 5e-4],
+        'temperature': [1], 
+        'output_dim': [64, 128, 256],
+        'num_epochs': [400],
+        'eval_num_epochs': [200],
+        'eval_patience': [50],
     }
     info_critic = {
         'est': ['info_critic'],
-        'learning_rate': [5e-1, 1e-1, 5e-2, 1e-2],
+        'model': ['MosiFusion', 'MosiFusionAttention'],
+        'learning_rate': [5e-2, 1e-2, 5e-3],
         'temperature' : [1],
-        'output_dim': [64, 128, 256, 512, 1024],
+        'output_dim': [64, 128, 256],
+        'num_epochs': [300],
+        'eval_num_epochs': [200],
+        'eval_patience': [50],
+    }
+    info_critic_MISA = {
+        'est': ['info_critic'],
+        'model': ['MosiMISA'],
+        'learning_rate': [1e-1, 1e-2, 1e-4, 1e-6, 1e-8],
+        'temperature' : [1],
+        'output_dim': [32, 64, 128, 256],
+        'num_epochs': [300],
+        'eval_num_epochs': [200],
+        'eval_patience': [50],
     }
     supervised = {
         'est': ['supervised'],
-        'learning_rate': [5e-1, 1e-1, 1e-2, 5e-3],
-        'output_dim': [64, 128, 256, 512, 1024],
+        'model': ['MosiFusion'],
+        'learning_rate': [1e-3, 1e-4],
+        'output_dim': [128], #16, 32, 64, 256
+        'num_epochs': [500],
+        'eval_lr': [0.1, 0.01, 0.001, 1e-6],
+        'eval_num_epochs': [400],
+        'eval_patience': [400],
+    }
+    supervised_MISA = {
+        'est': ['supervised'],
+        'model': ['MosiMISA'],
+        'learning_rate': [1e-2, 1e-3],
+        'output_dim': [128], #16, 32, 64, 256
+        'num_epochs': [500],
+        'eval_lr': [0.1, 0.01, 0.001, 1e-6],
+        'eval_num_epochs': [400],
+        'eval_patience': [400],
     }
 
     # Join dictionary
-    to_search.update(SimCLR) 
+    # to_search.update(SimCLR) 
+    # to_search.update(SimCLR_MISA) 
     # to_search.update(info_critic)
+    # to_search.update(info_critic_MISA)
     # to_search.update(supervised)
+    to_search.update(supervised_MISA)
 
     # Trying shallower thinner GRUs, no dropout in fusion layer, smaller output dim and thinned lr
     # Now trying better range of lrs and increased unsupervised num_epochs and batch size, also wide range of output dims
@@ -72,6 +112,24 @@ if  __name__ == "__main__":
         # With Huber loss 5, Got 30.0% test, 76.2% train
 
     # Then using validation set
+
+    # MosiFusion
+        # Supervised - getting 7acc test 30.3%, train 84.5%
+        # SimCLR - getting 7acc test 21%, train 82%
+        # InfoCritic - getting 7acc test 18%, train 26%
+    # MosiMISA
+        # Supervised - getting 7acc test 28.6%, train 88.6%
+        # SimCLR - getting 7acc test 20.1%, train 60.8%
+        # InfoCritic - getting 7acc test 17.4%, train 26.6%
+
+    # Now trying bigger patience for hopefully smaller unsup losses
+    # sigma =0.1, iid_masks=False
+    # Now trying varying hidden size with output dim in MISA
+    # Also trying MosiFusionAttention
+
+    # Next
+    # Try linear Regression layer
+    # Try sigma=0.2
 
     grid_info_rank = slune.searchers.SearcherGrid(to_search)
 

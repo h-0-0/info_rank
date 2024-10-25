@@ -4,30 +4,33 @@ if  __name__ == "__main__":
     to_search = {
         'benchmark': ['mosei'],
         'model': ['MoseiFusion'],
-        'num_epochs': [100],
         'batch_size': [128],
         'patience': [10],
         'optimizer': ['SGD'], 
 
-        'eval_num_epochs': [300],
+        'eval_num_epochs': [500],
         'eval_patience': [20],
     }
     SimCLR = {
         'est': ['SimCLR'],
-        'learning_rate': [1e-1, 1e-2, 1e-3, 1e-4, 1e-6],
+        'learning_rate': [1e-1, 1e-2, 1e-3],
         'temperature': [1], 
-        'output_dim': [256, 1024, 2048, 4096],
+        'output_dim': [128, 512, 2048],
+        'num_epochs': [100],
     }
     info_critic = {
         'est': ['info_critic'],
-        'learning_rate': [1e-1, 1e-2, 1e-3, 1e-4, 1e-6],
+        'learning_rate': [1e-3, 1e-4, 1e-5],
         'temperature' : [1],
-        'output_dim': [256, 1024, 2048, 4096],
+        'output_dim': [128, 512, 2048],
+        'num_epochs': [100],
     }
     supervised = {
         'est': ['supervised'],
-        'learning_rate': [1e-1, 1e-2, 1e-3, 1e-4, 1e-6],
-        'output_dim': [256, 1024, 2048, 4096],
+        'learning_rate': [1e-1, 1e-2],
+        'output_dim': [128, 512, 2048],
+        'num_epochs': [100],
+        'eval_lr': [None, 1e-3, 1e-4],
     }
 
     # Join dictionary
@@ -45,6 +48,11 @@ if  __name__ == "__main__":
     # Add layer to regression MLP
     # Train accuracy for info_critic concerning
     # Might need to improve augmentations
+
+    # With improved aug:
+        # supervised test 7acc 45.6%, train 91.1%
+        # info_critic test 7acc 40.89%, train 44.15%
+        # SimCLR test 7acc 40.36%, train 46.1%
 
     grid_info_rank = slune.searchers.SearcherGrid(to_search)
 

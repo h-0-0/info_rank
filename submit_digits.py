@@ -66,14 +66,14 @@ if  __name__ == "__main__":
     info_critic_fusion = {
         'est': ['info_critic'],
         'model': ['FusionModel'],
-        'learning_rate': [5e-2],
+        'learning_rate': [5e-2], 
         'temperature' : [1],
         'output_dim': [64, 32, 16, 8, 4, 2],
     }
     info_critic_audio = {
         'est': ['info_critic'],
         'model': ['AudioOnly'],
-        'learning_rate': [1e-5],
+        'learning_rate': [1e-5], 
         'temperature' : [1],
         'output_dim': [64, 32, 16, 8, 4, 2],
     }
@@ -86,7 +86,15 @@ if  __name__ == "__main__":
     }
     SimCLR = {
         'est': ['SimCLR'],
-        'learning_rate': [2e-4], 
+        'model': ['FusionModel', 'ImageOnly'],
+        'learning_rate': [2e-4],  
+        'temperature': [10], 
+        'output_dim': [64, 32, 16, 8, 4, 2],
+    }
+    SimCLR_audio = {
+        'est': ['SimCLR'],
+        'model': ['AudioOnly'],
+        'learning_rate': [1e-5], 
         'temperature': [10], 
         'output_dim': [64, 32, 16, 8, 4, 2],
     }
@@ -97,7 +105,7 @@ if  __name__ == "__main__":
         'temperature' : [1],
         'output_dim': [64, 32, 16, 8, 4, 2],
     }
-    for config in [info_critic_fusion, info_critic_audio, info_critic_image, SimCLR, supervised]:
+    for config in [SimCLR_audio]: # [info_critic_fusion, info_critic_audio, SimCLR, info_critic_image, supervised]:
         to_search = base_config.copy()
         to_search.update(config)
         grid_info_rank = slune.searchers.SearcherGrid(to_search)
