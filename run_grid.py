@@ -46,6 +46,7 @@ if  __name__ == "__main__":
     parser.add_argument('--eval_lr', type=none_or_float, help='Learning rate for evaluation training, if None then uses 0.1 * batch_size / 256', default=None)
     parser.add_argument('--eval_num_epochs', type=none_or_int, help='Number of epochs to train for evaluation training, if None then uses 50', default=None)
     parser.add_argument('--eval_patience', type=none_or_int, help='Patience for early stopping during evaluation training, if None then no early stopping', default=None)
+    parser.add_argument('--sigma', type=float, help='Variance of the gaussian noise to add to the data', default=0.1)
     args = parser.parse_args()
 
     config = {
@@ -69,6 +70,9 @@ if  __name__ == "__main__":
 
     print("Searching Over: ", config, flush=True)
     if args.benchmark == 'written_spoken_digits':
+        grid = slune.searchers.SearcherGrid(config, runs=10)
+    elif (args.benchmark == 'written_spoken_digits_weak_image') or (args.benchmark == 'written_spoken_digits_weak_audio'):
+        config['sigma'] = [args.sigma]
         grid = slune.searchers.SearcherGrid(config, runs=10)
     else:
         grid = slune.searchers.SearcherGrid(config, runs=1)
