@@ -273,7 +273,8 @@ def get_torchmetrics(modality, num_classes, device):
     return metrics
 
 from model import FusionModel, ImageModel, AudioModel, ResNet101, ResNet50, FullConvNet, MosiFusion, MoseiFusion
-from misa import MISA
+from misa_model import MISA
+from mult_model import MULTModel
 def get_model(model, output_dim):
     if model == "FusionModel":
         model = FusionModel(output_dim=output_dim)
@@ -314,6 +315,12 @@ def get_model(model, output_dim):
     elif model == "MoseiMISA":
         model = MISA('mosei', output_dim=output_dim)
         modality = 'image_ft+audio_ft+text'
+    elif model == "MosiMULT":
+        model = MULTModel('mosi', output_dim=output_dim)
+        modality = 'image_ft+audio_ft+text'
+    elif model == "MoseiMULT":
+        model = MULTModel('mosei', output_dim=output_dim)
+        modality = 'image_ft+audio_ft+text'
     else:
         raise ValueError("Invalid model")
     return model, modality
@@ -333,7 +340,7 @@ def get_classifier_criterion(model_name, output_dim, benchmark):
             raise ValueError("Invalid benchmark and model combination")
         classifier = SegClassifier(num_classes)
         criterion = nn.CrossEntropyLoss()
-    elif model_name in ["MosiFusion", "MoseiFusion", "MosiMISA", "MoseiMISA", "MosiFusionAttention", "MoseiFusionAttention"]:
+    elif model_name in ["MosiFusion", "MoseiFusion", "MosiMISA", "MoseiMISA", "MosiFusionAttention", "MoseiFusionAttention", "MosiMULT", "MoseiMULT"]:
         classifier = Regression(input_dim=output_dim)
         criterion = nn.MSELoss()
     elif model_name == "FCN50":

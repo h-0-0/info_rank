@@ -425,7 +425,7 @@ def LayerNorm(embedding_dim):
 
 
 class MULTModel(nn.Module):
-    def __init__(self, mosi_or_mosei):
+    def __init__(self, mosi_or_mosei, output_dim):
         """
         Construct a MulT model.
         """
@@ -434,6 +434,7 @@ class MULTModel(nn.Module):
             self.orig_d_l, self.orig_d_a, self.orig_d_v = 300, 74, 35
         elif mosi_or_mosei == 'mosei':
             self.orig_d_l, self.orig_d_a, self.orig_d_v = 300, 74, 713
+        self.output_dim = output_dim
         self.d_l, self.d_a, self.d_v = 30, 30, 30
         self.vonly = False
         self.aonly = False
@@ -456,8 +457,7 @@ class MULTModel(nn.Module):
             combined_dim = 2 * self.d_l   # assuming d_l == d_a == d_v
         else:
             combined_dim = 2 * (self.d_l + self.d_a + self.d_v)
-        
-        output_dim = 1       
+           
 
         # 1. Temporal convolutional layers
         self.proj_l = nn.Conv1d(self.orig_d_l, self.d_l, kernel_size=1, padding=0, bias=False)
@@ -485,6 +485,11 @@ class MULTModel(nn.Module):
         self.proj1 = nn.Linear(combined_dim, combined_dim)
         self.proj2 = nn.Linear(combined_dim, combined_dim)
         self.out_layer = nn.Linear(combined_dim, output_dim)
+
+        # Critic
+        self.critic = nn.Sequential(
+            nn.Linear(self.output_dim*2, 8),
+        )
 
     def get_network(self, self_type='l', layers=-1):
         if self_type in ['l', 'al', 'vl']:
@@ -566,3 +571,7 @@ class MULTModel(nn.Module):
         
         output = self.out_layer(last_hs_proj)
         return output, last_hs
+
+    def score(self, u, v):
+        concat = torch.cat((u, v), dim=1)
+        return self.critic(concat)
