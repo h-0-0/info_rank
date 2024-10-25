@@ -617,14 +617,14 @@ class Regression(nn.Module):
         self.num_classes = 1
         
         # Define MLP
-        self.layer = nn.Sequential(
-            nn.Linear(self.input_dim, self.input_dim//2),
-            nn.ReLU(),
-            nn.Linear(self.input_dim//2, self.input_dim//4),
-            nn.ReLU(),
-            nn.Linear(self.input_dim//4, self.output_dim)
-        )
-        # self.layer = nn.Linear(self.input_dim, self.output_dim)
+        # self.layer = nn.Sequential(
+        #     nn.Linear(self.input_dim, self.input_dim//2),
+        #     nn.ReLU(),
+        #     nn.Linear(self.input_dim//2, self.input_dim//4),
+        #     nn.ReLU(),
+        #     nn.Linear(self.input_dim//4, self.output_dim)
+        # )
+        self.layer = nn.Linear(self.input_dim, self.output_dim)
         
     def forward(self, x):
         return self.layer(x)
