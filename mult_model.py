@@ -225,7 +225,7 @@ class SinusoidalPositionalEmbedding(nn.Module):
             )
         self.weights[device] = self.weights[device].type_as(self._float_tensor)
         positions = make_positions(input, self.padding_idx, self.left_pad)
-        return self.weights[device].index_select(0, positions.view(-1)).view(bsz, seq_len, -1).detach()
+        return self.weights[device].index_select(0, positions.reshape(-1)).view(bsz, seq_len, -1).detach()
 
     def max_positions(self):
         """Maximum number of supported positions."""
@@ -435,15 +435,15 @@ class MULTModel(nn.Module):
         elif mosi_or_mosei == 'mosei':
             self.orig_d_l, self.orig_d_a, self.orig_d_v = 300, 74, 713
         self.output_dim = output_dim
-        self.d_l, self.d_a, self.d_v = 30, 30, 30
-        self.vonly = False
-        self.aonly = False
-        self.lonly = False
-        self.num_heads = 8
-        self.layers = 5
-        self.attn_dropout = 0.1
-        self.attn_dropout_a = 0.0
-        self.attn_dropout_v = 0.0
+        self.d_l, self.d_a, self.d_v = 40, 40, 40
+        self.vonly = True
+        self.aonly = True
+        self.lonly = True
+        self.num_heads = 10
+        self.layers = 4
+        self.attn_dropout = 0.2
+        self.attn_dropout_a = 0.2
+        self.attn_dropout_v = 0.2
         self.relu_dropout = 0.1
         self.res_dropout = 0.1
         self.out_dropout = 0.1
@@ -516,10 +516,11 @@ class MULTModel(nn.Module):
                                   embed_dropout=self.embed_dropout,
                                   attn_mask=self.attn_mask)
             
-    def forward(self, x_l, x_a, x_v):
+    def forward(self, batch):
         """
         text, audio, and vision should have dimension [batch_size, seq_len, n_features]
         """
+        x_v, x_a, x_l = batch
         x_l = F.dropout(x_l.transpose(1, 2), p=self.embed_dropout, training=self.training)
         x_a = x_a.transpose(1, 2)
         x_v = x_v.transpose(1, 2)
@@ -570,7 +571,7 @@ class MULTModel(nn.Module):
         last_hs_proj += last_hs
         
         output = self.out_layer(last_hs_proj)
-        return output, last_hs
+        return output #, last_hs
 
     def score(self, u, v):
         concat = torch.cat((u, v), dim=1)

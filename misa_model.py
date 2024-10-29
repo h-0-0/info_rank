@@ -52,7 +52,7 @@ class MISA(nn.Module):
         else:
             raise ValueError(f'Unknown dataset: {mosi_or_mosei}')
 
-        hidden_size = output_dim # TODO Remove
+        self.hidden_size = output_dim
 
         self.input_sizes = input_sizes = [self.text_size, self.visual_size, self.acoustic_size]
         self.hidden_sizes = hidden_sizes = [int(self.text_size), int(self.visual_size), int(self.acoustic_size)]
@@ -95,34 +95,34 @@ class MISA(nn.Module):
         #     self.project_t.add_module('project_t_layer_norm', nn.LayerNorm(config.hidden_size))
         # else:
         self.project_t = nn.Sequential()
-        self.project_t.add_module('project_t', nn.Linear(in_features=hidden_sizes[0]*4, out_features=hidden_size))
+        self.project_t.add_module('project_t', nn.Linear(in_features=hidden_sizes[0]*4, out_features=self.hidden_size))
         self.project_t.add_module('project_t_activation', self.activation)
-        self.project_t.add_module('project_t_layer_norm', nn.LayerNorm(hidden_size))
+        self.project_t.add_module('project_t_layer_norm', nn.LayerNorm(self.hidden_size))
 
         self.project_v = nn.Sequential()
-        self.project_v.add_module('project_v', nn.Linear(in_features=hidden_sizes[1]*4, out_features=hidden_size))
+        self.project_v.add_module('project_v', nn.Linear(in_features=hidden_sizes[1]*4, out_features=self.hidden_size))
         self.project_v.add_module('project_v_activation', self.activation)
-        self.project_v.add_module('project_v_layer_norm', nn.LayerNorm(hidden_size))
+        self.project_v.add_module('project_v_layer_norm', nn.LayerNorm(self.hidden_size))
 
         self.project_a = nn.Sequential()
-        self.project_a.add_module('project_a', nn.Linear(in_features=hidden_sizes[2]*4, out_features=hidden_size))
+        self.project_a.add_module('project_a', nn.Linear(in_features=hidden_sizes[2]*4, out_features=self.hidden_size))
         self.project_a.add_module('project_a_activation', self.activation)
-        self.project_a.add_module('project_a_layer_norm', nn.LayerNorm(hidden_size))
+        self.project_a.add_module('project_a_layer_norm', nn.LayerNorm(self.hidden_size))
 
 
         ##########################################
         # private encoders
         ##########################################
         self.private_t = nn.Sequential()
-        self.private_t.add_module('private_t_1', nn.Linear(in_features=hidden_size, out_features=hidden_size))
+        self.private_t.add_module('private_t_1', nn.Linear(in_features=self.hidden_size, out_features=self.hidden_size))
         self.private_t.add_module('private_t_activation_1', nn.Sigmoid())
         
         self.private_v = nn.Sequential()
-        self.private_v.add_module('private_v_1', nn.Linear(in_features=hidden_size, out_features=hidden_size))
+        self.private_v.add_module('private_v_1', nn.Linear(in_features=self.hidden_size, out_features=self.hidden_size))
         self.private_v.add_module('private_v_activation_1', nn.Sigmoid())
         
         self.private_a = nn.Sequential()
-        self.private_a.add_module('private_a_3', nn.Linear(in_features=hidden_size, out_features=hidden_size))
+        self.private_a.add_module('private_a_3', nn.Linear(in_features=self.hidden_size, out_features=self.hidden_size))
         self.private_a.add_module('private_a_activation_3', nn.Sigmoid())
         
 
@@ -130,7 +130,7 @@ class MISA(nn.Module):
         # shared encoder
         ##########################################
         self.shared = nn.Sequential()
-        self.shared.add_module('shared_1', nn.Linear(in_features=hidden_size, out_features=hidden_size))
+        self.shared.add_module('shared_1', nn.Linear(in_features=self.hidden_size, out_features=self.hidden_size))
         self.shared.add_module('shared_activation_1', nn.Sigmoid())
 
 
@@ -138,11 +138,11 @@ class MISA(nn.Module):
         # reconstruct
         ##########################################
         self.recon_t = nn.Sequential()
-        self.recon_t.add_module('recon_t_1', nn.Linear(in_features=hidden_size, out_features=hidden_size))
+        self.recon_t.add_module('recon_t_1', nn.Linear(in_features=self.hidden_size, out_features=self.hidden_size))
         self.recon_v = nn.Sequential()
-        self.recon_v.add_module('recon_v_1', nn.Linear(in_features=hidden_size, out_features=hidden_size))
+        self.recon_v.add_module('recon_v_1', nn.Linear(in_features=self.hidden_size, out_features=self.hidden_size))
         self.recon_a = nn.Sequential()
-        self.recon_a.add_module('recon_a_1', nn.Linear(in_features=hidden_size, out_features=hidden_size))
+        self.recon_a.add_module('recon_a_1', nn.Linear(in_features=self.hidden_size, out_features=self.hidden_size))
 
 
 
@@ -151,32 +151,32 @@ class MISA(nn.Module):
         ##########################################
         if not use_cmd_sim:
             self.discriminator = nn.Sequential()
-            self.discriminator.add_module('discriminator_layer_1', nn.Linear(in_features=hidden_size, out_features=hidden_size))
+            self.discriminator.add_module('discriminator_layer_1', nn.Linear(in_features=self.hidden_size, out_features=self.hidden_size))
             self.discriminator.add_module('discriminator_layer_1_activation', self.activation)
             self.discriminator.add_module('discriminator_layer_1_dropout', nn.Dropout(dropout_rate))
-            self.discriminator.add_module('discriminator_layer_2', nn.Linear(in_features=hidden_size, out_features=len(hidden_sizes)))
+            self.discriminator.add_module('discriminator_layer_2', nn.Linear(in_features=self.hidden_size, out_features=len(hidden_sizes)))
 
         ##########################################
         # shared-private collaborative discriminator
         ##########################################
 
         self.sp_discriminator = nn.Sequential()
-        self.sp_discriminator.add_module('sp_discriminator_layer_1', nn.Linear(in_features=hidden_size, out_features=4))
+        self.sp_discriminator.add_module('sp_discriminator_layer_1', nn.Linear(in_features=self.hidden_size, out_features=4))
 
 
 
         self.fusion = nn.Sequential()
-        self.fusion.add_module('fusion_layer_1', nn.Linear(in_features=hidden_size*6, out_features=hidden_size*3))
+        self.fusion.add_module('fusion_layer_1', nn.Linear(in_features=self.hidden_size*6, out_features=self.hidden_size*3))
         self.fusion.add_module('fusion_layer_1_dropout', nn.Dropout(dropout_rate))
         self.fusion.add_module('fusion_layer_1_activation', self.activation)
-        self.fusion.add_module('fusion_layer_3', nn.Linear(in_features=hidden_size*3, out_features= output_size))
+        self.fusion.add_module('fusion_layer_3', nn.Linear(in_features=self.hidden_size*3, out_features= output_size))
 
         self.tlayer_norm = nn.LayerNorm((hidden_sizes[0]*2,))
         self.vlayer_norm = nn.LayerNorm((hidden_sizes[1]*2,))
         self.alayer_norm = nn.LayerNorm((hidden_sizes[2]*2,))
 
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=2)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=self.hidden_size, nhead=2)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
 
         self.critic = nn.Sequential(
