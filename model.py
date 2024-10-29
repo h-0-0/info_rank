@@ -629,6 +629,95 @@ class Regression(nn.Module):
     def forward(self, x):
         return self.layer(x)
 
+from esa_net.model import ESANet, Decoder
+from esa_net.context_modules import get_context_module
+import warnings
+class ESANet_18(nn.Module):
+    def __init__(self, give_skips=False):
+        super(ESANet_18, self).__init__()
+        self.give_skips = give_skips
+        self.backbone = ESANet(
+            encoder_rgb='resnet18',
+            encoder_depth='resnet18',
+
+            encoder_block='BasicBlock',
+            height=240,
+            width=320,
+            channels_decoder=None,  # default: [128, 128, 128]
+            pretrained_on_imagenet=False,
+            activation='relu',
+            encoder_decoder_fusion='add',
+            context_module='ppm',
+            nr_decoder_blocks=None,  # default: [1, 1, 1]
+            fuse_depth_in_rgb_encoder='SE-add',
+            upsampling='bilinear',
+        )
+        
+        self.output_dim = 2048
+        self.critic = nn.Sequential(
+            nn.Linear(self.output_dim*2, 4),
+        )
+
+    def forward(self, x):
+        x_rgb, x_depth = x
+        out, skip3, skip2, skip1 = self.backbone(x_rgb, x_depth)
+        if self.give_skips:
+            return out, skip3, skip2, skip1
+        else:
+            return out.flatten(start_dim=1)
+
+    def score(self, u, v):
+        concat = torch.cat((u, v), dim=1)
+        return self.critic(concat)
+
+class ESANet_18_Decoder(nn.Module):
+    def __init__(self, num_classes=14):
+        super(ESANet_18_Decoder, self).__init__()
+
+        channels_decoder = [128, 128, 128]
+        nr_decoder_blocks = [1, 1, 1]
+        upsampling='bilinear'
+        height=240
+        width=320
+        context_module='ppm'
+        self.activation = nn.ReLU(inplace=True) 
+        # context module
+        if 'learned-3x3' in upsampling:
+            warnings.warn('for the context module the learned upsampling is '
+                          'not possible as the feature maps are not upscaled '
+                          'by the factor 2. We will use nearest neighbor '
+                          'instead.')
+            upsampling_context_module = 'nearest'
+        else:
+            upsampling_context_module = upsampling
+        self.context_module, channels_after_context_module = \
+            get_context_module(
+                context_module,
+                512,
+                channels_decoder[0],
+                input_size=(height // 32, width // 32),
+                activation=self.activation,
+                upsampling_mode=upsampling_context_module
+            )
+
+        self.decoder = Decoder(
+            channels_in=channels_after_context_module,
+            channels_decoder=channels_decoder,
+            
+            encoder_decoder_fusion='add',
+            activation=nn.ReLU(inplace=True),
+            nr_decoder_blocks=nr_decoder_blocks,
+            upsampling_mode='bilinear',
+
+            num_classes=num_classes,
+        )
+
+    def forward(self, batch):
+        out, skip3, skip2, skip1 = batch
+        out = self.context_module(out)
+        out = self.decoder(enc_outs=[out, skip3, skip2, skip1])
+        return out
+
 if __name__ == '__main__':
     print(MNIST_Image_CNN())
     print(MNIST_Audio_CNN())

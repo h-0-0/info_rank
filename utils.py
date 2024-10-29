@@ -272,7 +272,7 @@ def get_torchmetrics(modality, num_classes, device):
         raise ValueError("Invalid modality")
     return metrics
 
-from model import FusionModel, ImageModel, AudioModel, ResNet101, ResNet50, FullConvNet, MosiFusion, MoseiFusion
+from model import FusionModel, ImageModel, AudioModel, ResNet101, ResNet50, FullConvNet, MosiFusion, MoseiFusion, ESANet_18
 from misa_model import MISA
 from mult_model import MULTModel
 def get_model(model, output_dim):
@@ -296,6 +296,9 @@ def get_model(model, output_dim):
         modality = 'image+depth'
     elif model == "FCN101":
         model = FullConvNet(resnet='resnet101')
+        modality = 'image+depth'
+    elif model == "ESANet_18":
+        model = ESANet_18()
         modality = 'image+depth'
     elif model == "MosiFusion":
         model = MosiFusion(output_dim=output_dim)
@@ -325,7 +328,7 @@ def get_model(model, output_dim):
         raise ValueError("Invalid model")
     return model, modality
 
-from model import LinearClassifier, SegClassifier, Regression, FCN_SegHead
+from model import LinearClassifier, SegClassifier, Regression, FCN_SegHead, ESANet_18_Decoder
 def get_classifier_criterion(model_name, output_dim, benchmark):
     if model_name in ["FusionModel", "ImageOnly", "AudioOnly"]:
         num_classes = 10
@@ -356,6 +359,13 @@ def get_classifier_criterion(model_name, output_dim, benchmark):
         elif benchmark == 'nyu_v2_40':
             num_classes = 41
         classifier = FCN_SegHead(num_classes, resnet='resnet101')
+        criterion = nn.CrossEntropyLoss()
+    elif model_name == "ESANet_18":
+        if benchmark == 'nyu_v2_13':
+            num_classes = 14
+        elif benchmark == 'nyu_v2_40':
+            num_classes = 41
+        classifier = ESANet_18_Decoder(num_classes)
         criterion = nn.CrossEntropyLoss()
     else:
         raise ValueError("Invalid model name")
