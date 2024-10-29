@@ -356,10 +356,10 @@ def train(**kwargs):
         eval_train_loader = train_loader
     elif benchmark == "nyu_v2_13":
         torch.backends.cudnn.benchmark = True
-        train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=13, num_workers=4)
+        train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=13, num_workers=2)
     elif benchmark == "nyu_v2_40":
         torch.backends.cudnn.benchmark = True
-        train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=40, num_workers=4)
+        train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=40, num_workers=2)
     elif benchmark == "mosi":
         train_loader, val_loader, test_loader = mosi_get_data_loaders(batch_size=batch_size)
         eval_train_loader = train_loader
