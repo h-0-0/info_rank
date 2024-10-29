@@ -294,8 +294,6 @@ class Decoder(nn.Module):
 
     def forward(self, enc_outs):
         enc_out, enc_skip_down_16, enc_skip_down_8, enc_skip_down_4 = enc_outs
-        print("enc_out: ", enc_out.shape) #TODO remove
-        print("enc_skip_down_16: ", enc_skip_down_16.shape) #TODO remove
         out, out_down_32 = self.decoder_module_1(enc_out, enc_skip_down_16)
         out, out_down_16 = self.decoder_module_2(out, enc_skip_down_8)
         out, out_down_8 = self.decoder_module_3(out, enc_skip_down_4)
@@ -304,8 +302,8 @@ class Decoder(nn.Module):
         out = self.upsample1(out)
         out = self.upsample2(out)
 
-        if self.training:
-            return out, out_down_8, out_down_16, out_down_32
+        # if self.training:
+        #     return out, out_down_8, out_down_16, out_down_32
         return out
 
 
@@ -351,8 +349,6 @@ class DecoderModule(nn.Module):
             out_side = None
 
         out = self.upsample(out)
-        print("out: ", out.shape) #TODO remove
-        print("encoder_features: ", encoder_features.shape) #TODO remove
         if self.encoder_decoder_fusion == 'add':
             out += encoder_features
 
