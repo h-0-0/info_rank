@@ -12,24 +12,24 @@ if  __name__ == "__main__":
     }
     SimCLR = {
         'est': ['SimCLR'],
-        'learning_rate': [1e-2, 1e-3, 1e-4], #1e-4 only one without immediate failure
-        'temperature': [1], 
+        'learning_rate': [1e-2, 1e-3, 1e-4], 
+        'temperature': [10, 1, 0.1], 
         'output_dim': [2048],
-        'batch_size': [98],
+        'batch_size': [128],
     }
     info_critic = {
         'est': ['info_critic'],
         'learning_rate': [1e-2, 1e-3, 1e-4],
         'temperature' : [1],
         'output_dim': [2048],
-        'batch_size': [98],
+        'batch_size': [128],
     }
     supervised = {
         'est': ['supervised'],
         'learning_rate': [1e-2, 1e-3, 1e-4],
         'temperature' : [1],
         'output_dim': [2048],
-        'batch_size': [48],
+        'batch_size': [128],
     }
 
     # Join dictionary
