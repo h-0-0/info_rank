@@ -653,7 +653,7 @@ class ESANet_18(nn.Module):
             upsampling='bilinear',
         )
         
-        self.output_dim = 2048
+        self.output_dim = 40960
         self.critic = nn.Sequential(
             nn.Linear(self.output_dim*2, 4),
         )
