@@ -641,8 +641,8 @@ class ESANet_18(nn.Module):
             encoder_depth='resnet18',
 
             encoder_block='BasicBlock',
-            height=240,
-            width=320,
+            height=480,
+            width=640,
             channels_decoder=None,  # default: [128, 128, 128]
             pretrained_on_imagenet=False,
             activation='relu',
@@ -673,12 +673,12 @@ class ESANet_18(nn.Module):
 class ESANet_18_Decoder(nn.Module):
     def __init__(self, num_classes=14):
         super(ESANet_18_Decoder, self).__init__()
-
+        self.num_classes = num_classes
         channels_decoder = [128, 128, 128]
         nr_decoder_blocks = [1, 1, 1]
         upsampling='bilinear'
-        height=240
-        width=320
+        height=480
+        width=640
         context_module='ppm'
         self.activation = nn.ReLU(inplace=True) 
         # context module

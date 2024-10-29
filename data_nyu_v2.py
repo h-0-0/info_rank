@@ -26,7 +26,7 @@ def set_tensorflow_not_use_gpu():
 rgb_transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.4876, 0.4176, 0.4005], std=[0.2895, 0.2978, 0.3118]),
-            transforms.Resize((240, 320)),
+            transforms.Resize((480, 640)),
         ])
 depth_transform = transforms.Compose([
             lambda x: np.expand_dims(x, axis=-1) / 10.0, # Normalize depth values to [0, 1] and add channel dimension (like ToTensor does for RGB)
@@ -35,7 +35,7 @@ depth_transform = transforms.Compose([
             # transforms.ConvertImageDtype(torch.float16),
             # lambda x: torch.where(torch.isinf(x), torch.tensor(10.0), x), # Convert 'inf' to 10 
             transforms.Normalize(mean=[0.2707], std=[0.1517]),
-            transforms.Resize((240, 320)),
+            transforms.Resize((480, 640)),
         ])
 
 class NyuUnsupDataset(IterableDataset):
@@ -108,8 +108,8 @@ def get_nyu_v2(num_classes: int):
     train_set, test_set = download_nyu_v2()
     ds_train = NyuUnsupDataset(train_set)
     ds_test = NyuUnsupDataset(test_set) # We dont actally use this.
-    
-    t = transforms.Compose([transforms.ToTensor(), transforms.Resize((240, 320))])
+    # To tensor, resize and one hot encode the segmentation labels
+    t = transforms.Compose([transforms.ToTensor(), transforms.Resize((480, 640))])
     ds_train_supervised = NYUv2('data/NYUv2',  download=True, train=True, num_classes=num_classes,
         rgb_transform=rgb_transform, seg_transform=t, depth_transform=depth_transform)
     ds_test_supervised = NYUv2('data/NYUv2', download=True, train=False, num_classes=num_classes,
