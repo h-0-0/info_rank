@@ -362,8 +362,7 @@ def train(**kwargs):
         train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=40, num_workers=4)
     elif benchmark == "mosi":
         train_loader, val_loader, test_loader = mosi_get_data_loaders(batch_size=batch_size)
-        eval_train_loader = val_loader
-        torch.autograd.detect_anomaly(True)
+        eval_train_loader = train_loader
     elif benchmark == "mosei":
         train_loader, val_loader, test_loader = mosei_get_data_loaders(batch_size=batch_size)
         eval_train_loader = val_loader
@@ -386,6 +385,8 @@ def train(**kwargs):
 
     # If we want to do supervised training, otherwise continue on to unsupervised training
     if est == "supervised" :
+        if hasattr(model, 'give_skips'): # For models that make use of earlier activations 
+            model.give_skips = True 
         if benchmark == "nyu_v2_13" or benchmark == "nyu_v2_40":
             model, classifier = supervised_train(model, classifier, criterion, eval_train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type)
             train_loader = eval_train_loader
@@ -420,7 +421,9 @@ def train(**kwargs):
 
     # Train the model
     model = unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperature, device, writer, saver, num_epochs, patience, modality=modality)
-
+    
+    if hasattr(model, 'give_skips'): # For models that make use of earlier activations 
+        model.give_skips = True 
     # Now that we have trained the model, we evaluate it by training a linear classifier on top of the frozen representations
     model, classifier = eval_train(model, classifier, criterion, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality)
 
