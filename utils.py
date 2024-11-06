@@ -345,7 +345,8 @@ def get_classifier_criterion(model_name, output_dim, benchmark):
         criterion = nn.CrossEntropyLoss()
     elif model_name in ["MosiFusion", "MoseiFusion", "MosiMISA", "MoseiMISA", "MosiFusionAttention", "MoseiFusionAttention", "MosiMULT", "MoseiMULT"]:
         classifier = Regression(input_dim=output_dim)
-        criterion = nn.MSELoss()
+        # criterion = nn.MSELoss()
+        criterion = nn.L1Loss()
     elif model_name == "FCN50":
         if benchmark == 'nyu_v2_13':
             num_classes = 14
