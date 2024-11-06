@@ -13,8 +13,23 @@ import slune
 import os
 from model import FusionModel, LinearClassifier, ImageModel, AudioModel, ResNet101, SegClassifier, ResNet50, MosiFusion, MoseiFusion, Regression, FullConvNet, FCN_SegHead
 from loss import SimCLR_loss, info_critic, info_critic_plus, prob_loss, decomposed_loss, get_train_accuracy, augmenter
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-def supervised_train(model, classifier, criterion, train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality='image+audio', optimizer_type='SGD'):
+def get_valid_loss(model, classifier, criterion, valid_loader, modality, device):
+    total_loss = 0.0
+    num_batches = 0
+    with torch.no_grad():
+        for batch in valid_loader:
+            batch, labels = get_batch_labels(modality, batch, device)
+            rep = model(batch)
+            logits = classifier(rep)
+
+            loss = criterion(logits, labels)
+            total_loss += loss.item()
+            num_batches += 1
+    return total_loss / num_batches
+
+def supervised_train(model, classifier, criterion, train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality='image+audio', optimizer_type='SGD', grad_clip=None, scheduler=None, valid_loader=None):
     if optimizer_type == 'SGD':
         optimizer = optim.SGD(list(model.parameters()) + list(classifier.parameters()), lr=learning_rate)
     elif optimizer_type == 'Adam':
@@ -43,6 +58,7 @@ def supervised_train(model, classifier, criterion, train_loader, device, writer,
             # Zero the gradients
             optimizer.zero_grad()
             # Forward pass
+            torch.autograd.set_detect_anomaly(True) #TODO: remove
             batch, labels = get_batch_labels(modality, batch, device)
             with torch.autocast('cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float16):
                 rep = model(batch)
@@ -61,12 +77,20 @@ def supervised_train(model, classifier, criterion, train_loader, device, writer,
 
             # Backward pass and optimization
             loss.backward()
+            if grad_clip is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             optimizer.step()
 
             # If we have NaNs, stop training
             if torch.isnan(loss):
                 print("NaNs encountered, stopping training", flush=True)
                 return model, classifier
+            
+            if scheduler is not None:
+                if valid_loader is None:
+                    raise ValueError("Need a validation loader to use scheduler")
+                val_loss = get_valid_loss(model, classifier, criterion, valid_loader, modality, device)
+                scheduler.step(val_loss) 
             
         if (epoch + 1) % 25 == 0:
             # Print progress
@@ -97,7 +121,7 @@ def supervised_train(model, classifier, criterion, train_loader, device, writer,
                 break
     return model, classifier
     
-def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperature, device, writer, saver, num_epochs, patience, modality='image+audio'):
+def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperature, device, writer, saver, num_epochs, patience, modality='image+audio', grad_clip=None):
     # Set-up for training
     best_loss = float('inf') # For early stopping
     patience_counter = 0 # For early stopping
@@ -127,6 +151,8 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
                 loss = loss_fun(model, batch1, batch2, temperature, device)
             # Backward pass and optimization
             loss.backward()
+            if grad_clip is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             # scaler.scale(loss).backward() #TODO: remove
             optimizer.step()
             # scaler.step(optimizer) #TODO: remove
@@ -184,7 +210,7 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
                 break
     return model
             
-def eval_train(model, classifier, criterion, optimizer, train_loader, device, writer, saver, lr, num_epochs, patience, modality='image+audio'):
+def eval_train(model, classifier, criterion, optimizer, train_loader, device, writer, saver, lr, num_epochs, patience, modality='image+audio', grad_clip=None):
     optimizer = optim.SGD(classifier.parameters(), lr=lr)
     for param in model.parameters():
         param.requires_grad = False
@@ -209,6 +235,8 @@ def eval_train(model, classifier, criterion, optimizer, train_loader, device, wr
             # Backward pass and optimization
             loss.backward() 
             # scaler.scale(loss).backward() #TODO: remove
+            if grad_clip is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             optimizer.step() 
             # scaler.step(optimizer) #TODO: remove
             # scaler.update() #TODO: remove
@@ -333,6 +361,8 @@ def train(**kwargs):
     eval_lr = kwargs.get('eval_lr', 0.1 * batch_size / 256)
     eval_num_epochs = kwargs.get('eval_num_epochs', 50)
     eval_patience = kwargs.get('eval_patience', None)
+    grad_clip = kwargs.get('grad_clip', None)
+    scheduler = kwargs.get('scheduler', None)
 
     # Create save location using slune and tensorboard writer
     saver = slune.get_csv_saver(kwargs, root_dir='results')
@@ -362,10 +392,10 @@ def train(**kwargs):
         train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=40, num_workers=2)
     elif benchmark == "mosi":
         train_loader, val_loader, test_loader = mosi_get_data_loaders(batch_size=batch_size)
-        eval_train_loader = train_loader
+        # eval_train_loader = train_loader
     elif benchmark == "mosei":
         train_loader, val_loader, test_loader = mosei_get_data_loaders(batch_size=batch_size)
-        eval_train_loader = val_loader
+        # eval_train_loader = val_loader
     else:
         raise ValueError("Invalid benchmark: {}".format(benchmark))
     
@@ -382,22 +412,28 @@ def train(**kwargs):
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     else:
         raise ValueError("Invalid optimizer")
-
+    # Set up the scheduler if wanted
+    if scheduler is not None:
+        print("Using scheduler", flush=True) #TODO: remove
+        if scheduler == 'ReduceLROnPlateau':
+            scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=20, factor=0.1)
+        else:
+            raise ValueError("Invalid scheduler")
     # If we want to do supervised training, otherwise continue on to unsupervised training
     if est == "supervised" :
         if hasattr(model, 'give_skips'): # For models that make use of earlier activations 
             model.give_skips = True 
         if benchmark == "nyu_v2_13" or benchmark == "nyu_v2_40":
-            model, classifier = supervised_train(model, classifier, criterion, eval_train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type)
+            model, classifier = supervised_train(model, classifier, criterion, eval_train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type, grad_clip=grad_clip, scheduler=scheduler)
             train_loader = eval_train_loader
         elif benchmark == "mosi" or benchmark == "mosei":
-            model, classifier = supervised_train(model, classifier, criterion, train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type)
-            classifier, criterion = get_classifier_criterion(model_name, model.output_dim, benchmark)
-            classifier = classifier.to(device)
-            model, classifier = eval_train(model, classifier, criterion, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality)
+            model, classifier = supervised_train(model, classifier, criterion, train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type, grad_clip=grad_clip, scheduler=scheduler, valid_loader=val_loader)
+            # classifier, criterion = get_classifier_criterion(model_name, model.output_dim, benchmark)
+            # classifier = classifier.to(device)
+            # model, classifier = eval_train(model, classifier, criterion, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality)
             test(model, classifier, train_loader, device, writer, saver, name='valid', modality=modality)
         elif benchmark == "written_spoken_digits":
-            model, classifier = supervised_train(model, classifier, criterion, train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type)
+            model, classifier = supervised_train(model, classifier, criterion, train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type, grad_clip=grad_clip, scheduler=scheduler)
         test(model, classifier, test_loader, device, writer, saver, name='test', modality=modality)
         test(model, classifier, train_loader, device, writer, saver, name='train', modality=modality)
         saver.save_collated()
@@ -420,12 +456,12 @@ def train(**kwargs):
         raise ValueError("Invalid est(imator)")
 
     # Train the model
-    model = unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperature, device, writer, saver, num_epochs, patience, modality=modality)
+    model = unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperature, device, writer, saver, num_epochs, patience, modality=modality, grad_clip=grad_clip)
     
     if hasattr(model, 'give_skips'): # For models that make use of earlier activations 
         model.give_skips = True 
     # Now that we have trained the model, we evaluate it by training a linear classifier on top of the frozen representations
-    model, classifier = eval_train(model, classifier, criterion, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality)
+    model, classifier = eval_train(model, classifier, criterion, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality, grad_clip=grad_clip)
 
     # Evaluate the model on the test set
     test(model, classifier, test_loader, device, writer, saver, 'test', modality=modality)
@@ -454,9 +490,11 @@ if __name__ == "__main__":
         'batch_size': 128, #16
         'patience': 10,
         'temperature': 1,
-        'output_dim': 128,
+        'output_dim': 1,
         'optimizer': 'SGD',
         'eval_num_epochs': 10,
+        'grad_clip': 1.0,
+        'scheduler': True,
     }
     # Train the model
     model = train(**config)

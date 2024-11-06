@@ -30,6 +30,13 @@ def none_or_float(value):
     except ValueError:
         raise argparse.ArgumentTypeError(f"{value} is not a float")
 
+def none_or_str(value):
+    if value is None:
+        return None
+    elif value == 'None':
+        return None
+    return value
+
 if  __name__ == "__main__":
     # Parse input from command line
     parser = argparse.ArgumentParser()
@@ -47,6 +54,8 @@ if  __name__ == "__main__":
     parser.add_argument('--eval_num_epochs', type=none_or_int, help='Number of epochs to train for evaluation training, if None then uses 50', default=None)
     parser.add_argument('--eval_patience', type=none_or_int, help='Patience for early stopping during evaluation training, if None then no early stopping', default=None)
     parser.add_argument('--sigma', type=float, help='Variance of the gaussian noise to add to the data', default=0.1)
+    parser.add_argument('--grad_clip', type=none_or_float, help='Gradient clipping value', default=None)
+    parser.add_argument('--scheduler', type=none_or_str, help='Scheduler to use', default=None)
     args = parser.parse_args()
 
     config = {
@@ -67,6 +76,10 @@ if  __name__ == "__main__":
         config['eval_num_epochs'] = [args.eval_num_epochs]
     if args.eval_patience is not None:
         config['eval_patience'] = [args.eval_patience]
+    if args.grad_clip is not None:
+        config['grad_clip'] = [args.grad_clip]
+    if args.scheduler is not None:
+        config['scheduler'] = [args.scheduler]
 
     print("Searching Over: ", config, flush=True)
     if args.benchmark == 'written_spoken_digits':
