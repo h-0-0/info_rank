@@ -435,19 +435,19 @@ class MULTModel(nn.Module):
         elif mosi_or_mosei == 'mosei':
             self.orig_d_l, self.orig_d_a, self.orig_d_v = 300, 74, 713
         self.output_dim = output_dim
-        self.d_l, self.d_a, self.d_v = 40, 40, 40
+        self.d_l, self.d_a, self.d_v = 30, 30, 30
         self.vonly = True
         self.aonly = True
         self.lonly = True
         self.num_heads = 10
-        self.layers = 4
+        self.layers = 5
         self.attn_dropout = 0.2
-        self.attn_dropout_a = 0.2
-        self.attn_dropout_v = 0.2
+        self.attn_dropout_a = 0.0
+        self.attn_dropout_v = 0.0
         self.relu_dropout = 0.1
         self.res_dropout = 0.1
-        self.out_dropout = 0.1
-        self.embed_dropout = 0.25
+        self.out_dropout = 0.0
+        self.embed_dropout = 0.2
         self.attn_mask = True
 
         combined_dim = self.d_l + self.d_a + self.d_v
@@ -483,7 +483,7 @@ class MULTModel(nn.Module):
        
         # Projection layers
         self.proj1 = nn.Linear(combined_dim, combined_dim)
-        self.proj2 = nn.Linear(combined_dim, combined_dim)
+        # self.proj2 = nn.Linear(combined_dim, combined_dim)
         self.out_layer = nn.Linear(combined_dim, output_dim)
 
         # Critic
@@ -567,7 +567,8 @@ class MULTModel(nn.Module):
             last_hs = torch.cat([last_h_l, last_h_a, last_h_v], dim=1)
         
         # A residual block
-        last_hs_proj = self.proj2(F.dropout(F.relu(self.proj1(last_hs)), p=self.out_dropout, training=self.training))
+        # last_hs_proj = self.proj2(F.dropout(F.relu(self.proj1(last_hs)), p=self.out_dropout, training=self.training))
+        last_hs_proj = self.proj1(last_hs)
         last_hs_proj += last_hs
         
         output = self.out_layer(last_hs_proj)

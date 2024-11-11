@@ -615,7 +615,7 @@ class Regression(nn.Module):
         self.input_dim = input_dim
         self.output_dim = 1
         self.num_classes = 1
-        
+        self.out_dropout = 0.0
         # Define MLP
         # self.layer = nn.Sequential(
         #     nn.Linear(self.input_dim, self.input_dim//2),
@@ -627,6 +627,7 @@ class Regression(nn.Module):
         self.layer = nn.Linear(self.input_dim, self.output_dim)
         
     def forward(self, x):
+        x = F.dropout(F.relu(x), p=self.out_dropout, training=self.training)
         return self.layer(x)
 
 from esa_net.model import ESANet, Decoder
