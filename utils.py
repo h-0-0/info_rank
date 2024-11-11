@@ -251,8 +251,8 @@ def get_torchmetrics(modality, num_classes, device):
         
         metrics['acc'] = accuracy
     elif modality == 'image+depth':
-        accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device)
-        jaccard = torchmetrics.JaccardIndex(task="multiclass", num_classes=num_classes).to(device)
+        accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes, ignore_index=-1).to(device)
+        jaccard = torchmetrics.JaccardIndex(task="multiclass", num_classes=num_classes, ignore_index=-1, average='macro', validate_args=True).to(device) # TODO: change validate_args to False
 
         metrics['acc'] = accuracy
         metrics['IoU'] = jaccard
@@ -328,8 +328,113 @@ def get_model(model, output_dim):
         raise ValueError("Invalid model")
     return model, modality
 
+import numpy as np
+class SegCrossEntropyLoss(nn.Module):
+    def __init__(self, device, weight):
+        super(SegCrossEntropyLoss, self).__init__()
+        self.weight = torch.tensor(weight).to(device)
+        self.num_classes = len(self.weight) + 1  # +1 for void
+        if self.num_classes < 2**8:
+            self.dtype = torch.uint8
+        else:
+            self.dtype = torch.int16
+        self.ce_loss = nn.CrossEntropyLoss(
+            torch.from_numpy(np.array(weight)).float(),
+            reduction='none',
+            ignore_index=-1
+        )
+        self.ce_loss.to(device)
+
+    def forward(self, inputs_scales, targets_scales):
+        # losses = []
+        number_of_pixels_per_class = torch.stack([torch.bincount(targets_scales[i].flatten().type(self.dtype), minlength=self.num_classes) for i in range(targets_scales.shape[0])])
+        divisor_weighted_pixel_sum = torch.sum(number_of_pixels_per_class[:,1:] * self.weight, dim=[1])   # without void
+        targets_scales -= 1
+        loss_all = self.ce_loss(inputs_scales, targets_scales.long())
+        loss = torch.div(torch.sum(loss_all, dim=[1,2]), divisor_weighted_pixel_sum)
+        loss = torch.mean(loss)
+        return loss
+        # for inputs, targets in zip(inputs_scales, targets_scales):
+        #     # mask = targets > 0
+        #     targets_m = targets.clone()
+        #     targets_m -= 1
+        #     print(inputs.shape, targets_m.shape)
+        #     loss_all = self.ce_loss(inputs, targets_m.long())
+
+        #     number_of_pixels_per_class = \
+        #         torch.bincount(targets.flatten().type(self.dtype),
+        #                        minlength=self.num_classes)
+        #     divisor_weighted_pixel_sum = \
+        #         torch.sum(number_of_pixels_per_class[1:] * self.weight)   # without void
+        #     losses.append(torch.sum(loss_all) / divisor_weighted_pixel_sum)
+        #     # losses.append(torch.sum(loss_all) / torch.sum(mask.float()))
+
+        # return losses
+
+import os 
+import pickle
+def compute_class_weights(data_loader, weight_mode='median_frequency', c=1.02, n_classes_with_void=13, source_path='data', split='train'):
+        assert weight_mode in ['median_frequency', 'logarithmic', 'linear']
+        n_classes_without_void = n_classes_with_void - 1
+        # build filename
+        class_weighting_filepath = os.path.join(
+            source_path, f'weighting_{weight_mode}_'
+                              f'1+{n_classes_without_void}')
+        if weight_mode == 'logarithmic':
+            class_weighting_filepath += f'_c={c}'
+
+        class_weighting_filepath += f'_{split}.pickle'
+
+        if os.path.exists(class_weighting_filepath):
+            class_weighting = pickle.load(open(class_weighting_filepath, 'rb'))
+            print(f'Using {class_weighting_filepath} as class weighting')
+            return class_weighting
+
+        print('Compute class weights')
+
+        n_pixels_per_class = np.zeros(n_classes_with_void)
+        n_image_pixels_with_class = np.zeros(n_classes_with_void)
+        for batch in data_loader:
+            _ , _, label = batch
+            _, h, w = label.shape
+            current_dist = np.bincount(label.flatten(),
+                                       minlength=n_classes_with_void)
+            n_pixels_per_class += current_dist
+
+            # For median frequency we need the pixel sum of the images where
+            # the specific class is present. (It only matters if the class is
+            # present in the image and not how many pixels it occupies.)
+            class_in_image = current_dist > 0
+            n_image_pixels_with_class += class_in_image * h * w
+
+        # remove void
+        n_pixels_per_class = n_pixels_per_class[1:]
+        n_image_pixels_with_class = n_image_pixels_with_class[1:]
+
+        if weight_mode == 'linear':
+            class_weighting = n_pixels_per_class
+
+        elif weight_mode == 'median_frequency':
+            frequency = n_pixels_per_class / n_image_pixels_with_class
+            class_weighting = np.median(frequency) / frequency
+
+        elif weight_mode == 'logarithmic':
+            probabilities = n_pixels_per_class / np.sum(n_pixels_per_class)
+            class_weighting = 1 / np.log(c + probabilities)
+
+        if np.isnan(np.sum(class_weighting)):
+            print(f"n_pixels_per_class: {n_pixels_per_class}")
+            print(f"n_image_pixels_with_class: {n_image_pixels_with_class}")
+            print(f"class_weighting: {class_weighting}")
+            raise ValueError('class weighting contains NaNs')
+
+        with open(class_weighting_filepath, 'wb') as f:
+            pickle.dump(class_weighting, f)
+        print(f'Saved class weights under {class_weighting_filepath}.')
+        return class_weighting    
+
 from model import LinearClassifier, SegClassifier, Regression, FCN_SegHead, ESANet_18_Decoder
-def get_classifier_criterion(model_name, output_dim, benchmark):
+def get_classifier_criterion(model_name, output_dim, benchmark, train_loader, device):
     if model_name in ["FusionModel", "ImageOnly", "AudioOnly"]:
         num_classes = 10
         classifier = LinearClassifier(output_dim, num_classes)
@@ -363,11 +468,13 @@ def get_classifier_criterion(model_name, output_dim, benchmark):
         criterion = nn.CrossEntropyLoss()
     elif model_name == "ESANet_18":
         if benchmark == 'nyu_v2_13':
-            num_classes = 14
+            num_classes = 13
         elif benchmark == 'nyu_v2_40':
-            num_classes = 41
+            num_classes = 40
         classifier = ESANet_18_Decoder(num_classes)
-        criterion = nn.CrossEntropyLoss()
+        class_weighting = compute_class_weights(train_loader, weight_mode='median_frequency', n_classes_with_void=num_classes+1)
+        print(f"Class weighting: {class_weighting}")
+        criterion = SegCrossEntropyLoss(device, class_weighting)
     else:
         raise ValueError("Invalid model name")
     return classifier, criterion

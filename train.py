@@ -272,7 +272,7 @@ def eval_train(model, classifier, criterion, optimizer, train_loader, device, wr
                 break
     return model, classifier
 
-def test(model, classifier, data_loader, device, writer, saver, name='test', modality='image+audio'):
+def test(model, classifier, criterion, data_loader, device, writer, saver, name='test', modality='image+audio'):
     # Test the classifier
     model.eval()  # Set the model to evaluation mode
     classifier.eval()  # Set the classifier to evaluation mode
@@ -283,11 +283,9 @@ def test(model, classifier, data_loader, device, writer, saver, name='test', mod
     metrics = get_torchmetrics(modality, num_classes, device)
     if modality == 'image_ft+audio_ft+text':
         # Regression task
-        criterion = nn.MSELoss()
         get_predicitons = lambda x: x
     else:
         # Classification task
-        criterion = nn.CrossEntropyLoss()
         get_predicitons = lambda x: torch.max(x, 1)[1]
     with torch.no_grad():
         for batch in data_loader:
@@ -392,16 +390,16 @@ def train(**kwargs):
         train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=40, num_workers=2)
     elif benchmark == "mosi":
         train_loader, val_loader, test_loader = mosi_get_data_loaders(batch_size=batch_size)
-        # eval_train_loader = train_loader
+        eval_train_loader = train_loader
     elif benchmark == "mosei":
         train_loader, val_loader, test_loader = mosei_get_data_loaders(batch_size=batch_size)
-        # eval_train_loader = val_loader
+        eval_train_loader = train_loader
     else:
         raise ValueError("Invalid benchmark: {}".format(benchmark))
     
     model_name = model
     model, modality = get_model(model, output_dim)
-    classifier, criterion = get_classifier_criterion(model_name, model.output_dim, benchmark)
+    classifier, criterion = get_classifier_criterion(model_name, model.output_dim, benchmark, eval_train_loader, device)
     model = model.to(device)
     classifier = classifier.to(device)
     if optimizer == "SGD":
@@ -434,8 +432,8 @@ def train(**kwargs):
             test(model, classifier, train_loader, device, writer, saver, name='valid', modality=modality)
         elif benchmark == "written_spoken_digits":
             model, classifier = supervised_train(model, classifier, criterion, train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type, grad_clip=grad_clip, scheduler=scheduler)
-        test(model, classifier, test_loader, device, writer, saver, name='test', modality=modality)
-        test(model, classifier, train_loader, device, writer, saver, name='train', modality=modality)
+        test(model, classifier, criterion, test_loader, device, writer, saver, name='test', modality=modality)
+        test(model, classifier, criterion, train_loader, device, writer, saver, name='train', modality=modality)
         saver.save_collated()
         return model, classifier
     elif est == "supervised":
@@ -464,10 +462,10 @@ def train(**kwargs):
     model, classifier = eval_train(model, classifier, criterion, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality, grad_clip=grad_clip)
 
     # Evaluate the model on the test set
-    test(model, classifier, test_loader, device, writer, saver, 'test', modality=modality)
+    test(model, classifier, criterion, test_loader, device, writer, saver, 'test', modality=modality)
 
     # Evaluate the model on the train set
-    test(model, classifier, eval_train_loader, device, writer, saver, 'train', modality=modality)
+    test(model, classifier, criterion, eval_train_loader, device, writer, saver, 'train', modality=modality)
 
     saver.save_collated()
     return model, classifier
@@ -494,7 +492,6 @@ if __name__ == "__main__":
         'optimizer': 'SGD',
         'eval_num_epochs': 10,
         'grad_clip': 1.0,
-        'scheduler': True,
     }
     # Train the model
     model = train(**config)
