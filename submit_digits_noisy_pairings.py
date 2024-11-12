@@ -2,8 +2,8 @@ import slune
 
 if  __name__ == "__main__":    
     base_config = {
-        'benchmark': ['written_spoken_digits_weak_audio', 'written_spoken_digits_weak_image'],
-        'sigma': [0.0001, 0.001, 0.01, 0.1, 1, 10, 100],
+        'benchmark': ['written_spoken_digits_noisy_pairing'],
+        'sigma': [0.01, 0.02, 0.04, 0.08, 0.10, 0.5],
         'num_epochs': [200],
         'batch_size': [128],
         'patience': [15],

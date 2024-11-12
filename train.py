@@ -1,4 +1,4 @@
-from data_digits import digits_get_data_loaders, digits_get_data_loaders_weak_modality
+from data_digits import digits_get_data_loaders, digits_get_data_loaders_weak_modality, digits_get_data_loaders_noisy_pairing
 from data_nyu_v2 import nyu_v2_get_data_loaders
 from data_mosi_mosei import mosi_get_data_loaders, mosei_get_data_loaders
 import torch
@@ -343,7 +343,7 @@ def train(**kwargs):
     """
     # Unpack the config
     benchmark = kwargs['benchmark']
-    if benchmark == "written_spoken_digits_weak_image" or benchmark == "written_spoken_digits_weak_audio":
+    if benchmark == "written_spoken_digits_weak_image" or benchmark == "written_spoken_digits_weak_audio" or "written_spoken_digits_noisy_pairing":
         sigma = kwargs.get('sigma', 0.1)
     model = kwargs['model']
     learning_rate = kwargs['learning_rate']
@@ -382,6 +382,9 @@ def train(**kwargs):
     elif benchmark == "written_spoken_digits_weak_audio":
         train_loader, test_loader = digits_get_data_loaders_weak_modality(batch_size=batch_size, sigma=sigma, weaken_audio=True)
         eval_train_loader = train_loader
+    elif benchmark == "written_spoken_digits_noisy_pairing":
+        train_loader, test_loader = digits_get_data_loaders_noisy_pairing(batch_size=batch_size, p=sigma)
+        eval_train_loader = train_loader     
     elif benchmark == "nyu_v2_13":
         torch.backends.cudnn.benchmark = True
         train_loader, _, eval_train_loader, test_loader = nyu_v2_get_data_loaders(batch_size=batch_size, num_classes=13, num_workers=2)
