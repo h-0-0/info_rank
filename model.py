@@ -719,6 +719,94 @@ class ESANet_18_Decoder(nn.Module):
         out = self.decoder(enc_outs=[out, skip3, skip2, skip1])
         return out
 
+class Transformer(nn.Module):
+    """Extends nn.Transformer."""
+    
+    def __init__(self, n_features, dim):
+        """Initialize Transformer object.
+
+        Args:
+            n_features (int): Number of features in the input.
+            dim (int): Dimension which to embed upon / Hidden dimension size.
+        """
+        super().__init__()
+        self.embed_dim = dim
+        self.conv = nn.Conv1d(n_features, self.embed_dim,
+                              kernel_size=1, padding=0, bias=False)
+        layer = nn.TransformerEncoderLayer(d_model=self.embed_dim, nhead=5)
+        self.transformer = nn.TransformerEncoder(layer, num_layers=5)
+
+    def forward(self, x):
+        """Apply Transformer to Input.
+
+        Args:
+            x (torch.Tensor): Layer Input
+
+        Returns:
+            torch.Tensor: Layer Output
+        """
+        if type(x) is list:
+            x = x[0]
+        x = self.conv(x.permute([0, 2, 1]))
+        x = x.permute([2, 0, 1])
+        x = self.transformer(x)[-1]
+        return x
+
+class MosiTransformer(nn.Module):
+    def __init__(self):
+        super(MosiTransformer, self).__init__()
+
+        self.vision_encoder = Transformer(35, 70)
+        self.audio_encoder = Transformer(74, 150)
+        self.text_encoder = Transformer(300, 600)
+
+        self.vision_encode_dim = 70
+        self.audio_encode_dim = 150
+        self.text_encode_dim = 600
+        self.vision_proj = nn.Sequential(
+            nn.Linear(self.vision_encode_dim, self.vision_encode_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.vision_encode_dim, self.vision_encode_dim)
+        )
+        self.audio_proj = nn.Sequential(
+            nn.Linear(self.audio_encode_dim, self.audio_encode_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.audio_encode_dim, self.audio_encode_dim)
+        )
+        self.text_proj = nn.Sequential(
+            nn.Linear(self.text_encode_dim, self.text_encode_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.text_encode_dim, self.text_encode_dim)
+        )
+
+        self.fusion_mlp = nn.Sequential(
+            nn.Identity(),
+        )
+        self.output_dim = self.vision_encode_dim + self.audio_encode_dim + self.text_encode_dim
+        self.critic = nn.Sequential(
+            nn.Linear(self.output_dim*2, 8),
+        )
+
+    def forward(self, batch):
+        image, audio, text = batch
+
+        image_repr = self.vision_encoder(image)
+        image_repr = self.vision_proj(image_repr)
+
+        audio_repr = self.audio_encoder(audio)
+        audio_repr = self.audio_proj(audio_repr)
+
+        text_repr = self.text_encoder(text)
+        text_repr = self.text_proj(text_repr)
+
+        fused_repr = torch.cat((image_repr, audio_repr, text_repr), dim=1)
+        output = self.fusion_mlp(fused_repr)
+        return output
+
+    def score(self, u, v):
+        concat = torch.cat((u, v), dim=1)
+        return self.critic(concat)
+
 if __name__ == '__main__':
     print(MNIST_Image_CNN())
     print(MNIST_Audio_CNN())

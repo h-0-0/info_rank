@@ -4,9 +4,8 @@ if  __name__ == "__main__":
     to_search = {
         'benchmark': ['mosi'],
         'batch_size': [128],
-        'patience': [500],
 
-        'optimizer': ['SGD'],
+        'optimizer': ['Adam'],
     }
     SimCLR = {
         'est': ['SimCLR'],
@@ -15,6 +14,7 @@ if  __name__ == "__main__":
         'temperature': [1], 
         'output_dim': [64, 128, 256],
         'num_epochs': [300],
+        'patience': [300],
         'eval_num_epochs': [200],
         'eval_patience': [50],
     }
@@ -25,6 +25,7 @@ if  __name__ == "__main__":
         'temperature': [1], 
         'output_dim': [64, 128, 256],
         'num_epochs': [400],
+        'patience': [400],
         'eval_num_epochs': [200],
         'eval_patience': [50],
     }
@@ -35,6 +36,7 @@ if  __name__ == "__main__":
         'temperature' : [1],
         'output_dim': [64, 128, 256],
         'num_epochs': [300],
+        'patience': [300],
         'eval_num_epochs': [200],
         'eval_patience': [50],
     }
@@ -45,28 +47,98 @@ if  __name__ == "__main__":
         'temperature' : [1],
         'output_dim': [32, 64, 128, 256],
         'num_epochs': [300],
+        'patience': [300],
         'eval_num_epochs': [200],
         'eval_patience': [50],
     }
     supervised = {
         'est': ['supervised'],
         'model': ['MosiFusion'],
-        'learning_rate': [1e-3, 1e-4],
+        'learning_rate': [5e-3, 1e-3, 5e-4],
         'output_dim': [128], #16, 32, 64, 256
-        'num_epochs': [500],
-        'eval_lr': [0.1, 0.01, 0.001, 1e-6],
-        'eval_num_epochs': [400],
-        'eval_patience': [400],
+        'num_epochs': [250, 500, 1000],
+        'patience': [1000],
+        'eval_lr': [0.005],
+        'eval_num_epochs': [200],
+        'eval_patience': [200],
     }
     supervised_MISA = {
         'est': ['supervised'],
         'model': ['MosiMISA'],
-        'learning_rate': [1e-2, 1e-3],
+        'learning_rate': [1e-2, 1e-3, 1e-4],
         'output_dim': [128], #16, 32, 64, 256
-        'num_epochs': [500],
-        'eval_lr': [0.1, 0.01, 0.001, 1e-6],
-        'eval_num_epochs': [400],
-        'eval_patience': [400],
+        'num_epochs': [250, 500, 1000],
+        'patience': [1000],
+        'eval_lr': ['None', 0.005],
+        'eval_num_epochs': [200],
+        'eval_patience': [200],
+        'grad_clip': [1.0, 'None'],
+    }
+    supervised_Attention = {
+        'est': ['supervised'],
+        'model': ['MosiFusionAttention'],
+        'learning_rate': [1e-2, 1e-3, 1e-4],
+        'output_dim': [128], #16, 32, 64, 256
+        'num_epochs': [250, 500, 1000],
+        'patience': [1000],
+        'eval_lr': [0.005],
+        'eval_num_epochs': [200],
+        'eval_patience': [200],
+    }
+    supervised_MULT = {
+        'est': ['supervised'],
+        'model': ['MosiMULT'],
+        'learning_rate': [1e-2, 5e-3, 1e-3, 5e-4, 1e-4],
+        'output_dim': [120, 180, 240],
+        'num_epochs': [50, 100, 150],
+        'patience': [200],
+        'grad_clip': [0.6, 0.8, 1.0, 'None'],
+        'scheduler' : ['ReduceLROnPlateau', 'None'],
+        # 'eval_lr': ['None', 0.005, 1e-8],
+        # 'eval_num_epochs': [200],
+        # 'eval_patience': [200],
+    }
+
+
+
+    supervised_MosiTrans = {
+        'est': ['supervised'],
+        'model': ['MosiTransformer'],
+        'learning_rate': [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8],
+        # 'output_dim': [120, 180, 240],
+        'num_epochs': [100],
+        'patience': [100],
+        'grad_clip': [0.6, 0.8, 1.0, 'None'],
+        'scheduler' : ['ReduceLROnPlateau', 'None'],
+        # 'eval_lr': ['None', 0.005, 1e-8],
+        # 'eval_num_epochs': [200],
+        # 'eval_patience': [200],
+    }
+    info_critic_MosiTrans = {
+        'est': ['info_critic'],
+        'model': ['MosiTransformer'],
+        'learning_rate': [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8],
+        # 'output_dim': [120, 180, 240],
+        'num_epochs': [100],
+        'patience': [100],
+        'grad_clip': [0.6, 0.8, 1.0, 'None'],
+        # 'scheduler' : ['ReduceLROnPlateau', 'None'],
+        # 'eval_lr': ['None', 0.005, 1e-8],
+        # 'eval_num_epochs': [200],
+        # 'eval_patience': [200],
+    }
+    SimCLR_MosiTrans = {
+        'est': ['SimCLR'],
+        'model': ['MosiTransformer'],
+        'learning_rate': [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8],
+        # 'output_dim': [120, 180, 240],
+        'num_epochs': [100],
+        'patience': [100],
+        'grad_clip': [0.6, 0.8, 1.0, 'None'],
+        # 'scheduler' : ['ReduceLROnPlateau', 'None'],
+        # 'eval_lr': ['None', 0.005, 1e-8],
+        # 'eval_num_epochs': [200],
+        # 'eval_patience': [200],
     }
 
     # Join dictionary
@@ -75,7 +147,12 @@ if  __name__ == "__main__":
     # to_search.update(info_critic)
     # to_search.update(info_critic_MISA)
     # to_search.update(supervised)
-    to_search.update(supervised_MISA)
+    # to_search.update(supervised_MISA)
+    # to_search.update(supervised_Attention)
+    # to_search.update(supervised_MULT)
+    # to_search.update(supervised_MosiTrans)
+    # to_search.update(info_critic_MosiTrans)
+    to_search.update(SimCLR_MosiTrans)
 
     # Trying shallower thinner GRUs, no dropout in fusion layer, smaller output dim and thinned lr
     # Now trying better range of lrs and increased unsupervised num_epochs and batch size, also wide range of output dims
