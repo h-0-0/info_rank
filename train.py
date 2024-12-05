@@ -1,6 +1,7 @@
 from data_digits import digits_get_data_loaders, digits_get_data_loaders_weak_modality, digits_get_data_loaders_noisy_pairing
 from data_nyu_v2 import nyu_v2_get_data_loaders
 from data_mosi_mosei import mosi_get_data_loaders, mosei_get_data_loaders
+from data_mosi_mosei_bert import mosi_get_data_loaders_bert, mosei_get_data_loaders_bert
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -148,7 +149,7 @@ def unsupervised_train(model, optimizer, loss_fun, train_loader, est, temperatur
                 # Zero the gradients
                 optimizer.zero_grad()
                 # Forward pass
-                loss = loss_fun(model, batch1, batch2, temperature, device)
+                loss = loss_fun(model, batch1, batch2, device, temperature=temperature)
             # Backward pass and optimization
             loss.backward()
             if grad_clip is not None:
@@ -281,14 +282,14 @@ def test(model, classifier, criterion, data_loader, device, writer, saver, name=
     total_batches = 0
     num_classes = classifier.num_classes
     metrics = get_torchmetrics(modality, num_classes, device)
-    if modality == 'image_ft+audio_ft+text':
+    if modality in ['image_ft+audio_ft+text', 'image_ft+text', 'image_ft+audio_ft+text_bert']:
         # Regression task
         get_predicitons = lambda x: x
     else:
         # Classification task
         get_predicitons = lambda x: torch.max(x, 1)[1]
     with torch.no_grad():
-        for batch in data_loader:
+        for b, batch in enumerate(data_loader):
             batch, labels = get_batch_labels(modality, batch, device)
             rep = model(batch)
             logits = classifier(rep)
@@ -394,14 +395,20 @@ def train(**kwargs):
     elif benchmark == "mosi":
         train_loader, val_loader, test_loader = mosi_get_data_loaders(batch_size=batch_size)
         eval_train_loader = train_loader
+    elif benchmark == "mosi_bert":
+        train_loader, val_loader, test_loader = mosi_get_data_loaders_bert(batch_size=batch_size)
+        eval_train_loader = train_loader
     elif benchmark == "mosei":
         train_loader, val_loader, test_loader = mosei_get_data_loaders(batch_size=batch_size)
+        eval_train_loader = train_loader
+    elif benchmark == "mosei_bert":
+        train_loader, val_loader, test_loader = mosei_get_data_loaders_bert(batch_size=batch_size)
         eval_train_loader = train_loader
     else:
         raise ValueError("Invalid benchmark: {}".format(benchmark))
     
     model_name = model
-    model, modality = get_model(model, output_dim)
+    model, modality = get_model(model, benchmark, output_dim)
     classifier, criterion = get_classifier_criterion(model_name, model.output_dim, benchmark, eval_train_loader, device)
     model = model.to(device)
     classifier = classifier.to(device)
@@ -427,14 +434,16 @@ def train(**kwargs):
         if benchmark == "nyu_v2_13" or benchmark == "nyu_v2_40":
             model, classifier = supervised_train(model, classifier, criterion, eval_train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type, grad_clip=grad_clip, scheduler=scheduler)
             train_loader = eval_train_loader
-        elif benchmark == "mosi" or benchmark == "mosei":
+        elif benchmark in ["mosi", "mosei", "mosi_bert", "mosei_bert"]:
             model, classifier = supervised_train(model, classifier, criterion, train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type, grad_clip=grad_clip, scheduler=scheduler, valid_loader=val_loader)
             # classifier, criterion = get_classifier_criterion(model_name, model.output_dim, benchmark)
             # classifier = classifier.to(device)
             # model, classifier = eval_train(model, classifier, criterion, optimizer, eval_train_loader, device, writer, saver, eval_lr, eval_num_epochs, eval_patience, modality=modality)
-            test(model, classifier, train_loader, device, writer, saver, name='valid', modality=modality)
-        elif benchmark == "written_spoken_digits":
+            test(model, classifier, criterion, val_loader, device, writer, saver, name='valid', modality=modality)
+        elif benchmark in ["written_spoken_digits", "written_spoken_digits_weak_image", "written_spoken_digits_weak_audio", "written_spoken_digits_noisy_pairing"]:
             model, classifier = supervised_train(model, classifier, criterion, train_loader, device, writer, saver, num_epochs, patience, learning_rate, modality=modality, optimizer_type=optimizer_type, grad_clip=grad_clip, scheduler=scheduler)
+        else:
+            raise ValueError("Invalid benchmark for supervised training")
         test(model, classifier, criterion, test_loader, device, writer, saver, name='test', modality=modality)
         test(model, classifier, criterion, train_loader, device, writer, saver, name='train', modality=modality)
         saver.save_collated()
@@ -488,7 +497,7 @@ if __name__ == "__main__":
         'model': args.model,
         'learning_rate': 1e-3, 
         'num_epochs': 0.0003,
-        'batch_size': 128, #16
+        'batch_size': 32, #16
         'patience': 10,
         'temperature': 1,
         'output_dim': 1,
