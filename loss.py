@@ -5,6 +5,8 @@ from torchvision.transforms import v2 as iT
 from torchaudio import transforms as aT
 from utils import generate_binary_combinations, swap_halves, dual_batch_indice_permutation, create_distribution, rnd_idx_without
 import math
+import numpy as np
+import copy
 
 def cosine_sim(y, temperature=0.1):
     """ Scoring function (cosine similarity)."""
@@ -75,14 +77,61 @@ def image_aug(x, type='mnist'):
     aug_x = augmentations(x)
     return aug_x
 
-def feat_aug(x):
-    augmentations = iT.Compose([
-        aT.TimeMasking(time_mask_param=10, p=0.15, iid_masks=False),  # apply time masking
-        aT.FrequencyMasking(freq_mask_param=4, iid_masks=False),  # apply frequency masking
-        iT.GaussianNoise(mean=0.0, sigma=0.1, clip=False),
-    ])
-    return augmentations(x)
+# def feat_aug(x):
+#     augmentations = iT.Compose([
+#         aT.TimeMasking(time_mask_param=10, p=0.15, iid_masks=False),  # apply time masking
+#         aT.FrequencyMasking(freq_mask_param=4, iid_masks=False),  # apply frequency masking
+#         iT.GaussianNoise(mean=0.0, sigma=0.1, clip=False),
+#     ])
+#     return augmentations(x)
 
+def permute(x):
+    # shuffle the sequence order
+    idx = torch.randperm(x.shape[0])
+    return x[idx]
+
+def noise(x):
+    noise = torch.randn(x.shape) * 0.1
+    return x + noise.to(x.device)
+
+def drop(x):
+    # drop 20% of the sequences
+    drop_num = x.shape[0] // 5
+
+    x_aug = torch.clone(x)
+    drop_idxs = np.random.choice(x.shape[0], drop_num, replace=False)
+    x_aug[drop_idxs] = 0.0
+    return x_aug 
+
+def identity(x):
+    return x
+
+def feat_aug(x_batch):
+    v1 = x_batch
+    v2 = torch.clone(v1)
+    transforms = [permute, noise, drop, identity]
+
+    for i in range(x_batch.shape[0]):
+        t_idxs = np.random.choice(4, 1, replace=False)
+        t = transforms[t_idxs[0]]
+        v2[i] = t(v2[i])
+
+    return v2
+
+def sentence_aug(x):
+    """
+    Randomly mask a random number of words in the sentence.
+    x is a list of sentences, each sentence is a list of words. 
+    """
+    # Randomly mask a random number of words in the sentence
+    x_new = copy.deepcopy(x)
+    for i, sentence in enumerate(x_new):
+        n = len(sentence)
+        mask = np.random.choice(n, np.random.randint(n)//4, replace=False)
+        for j in mask:
+            sentence[j] = '[MASK]'
+    return x_new
+    
 
 def audio_aug(x):
     """
@@ -113,7 +162,7 @@ def image_audio_aug(batch, device=None):
     return (image1, audio1), (image2, audio2)
 
 def augmenter(batch, modality, device):
-    batch = [b.to(device) for b in batch] if not torch.is_tensor(batch) else batch.to(device) 
+    batch = [b.to(device) if torch.is_tensor(b) else b for b in batch] if not torch.is_tensor(batch) else batch.to(device) 
     if modality == 'image+audio':
         batch1, batch2 = image_audio_aug(batch[:2], device=device)
     elif modality == 'image':
@@ -122,12 +171,17 @@ def augmenter(batch, modality, device):
         batch1, batch2 = audio_aug(batch[1]).to(device), audio_aug(batch[1]).to(device)
     elif modality == 'image+depth':
         batch1, batch2 = [image_aug(batch[0], type='nyu-rgb').to(device), image_aug(batch[1], type='nyu-depth').to(device)], [image_aug(batch[0], type='nyu-rgb').to(device), image_aug(batch[1], type='nyu-depth').to(device)],
-    elif modality == 'image_ft+audio_ft+text':
+    elif modality in ['image_ft+audio_ft+text', 'image_ft+text']:
         batch1 = [feat_aug(batch[i]).to(device) for i in range(3)]
         batch2 = [feat_aug(batch[i]).to(device) for i in range(3)]
+    elif modality == 'image_ft+audio_ft+text_bert':
+        # sentences, visual, acoustic, labels, lengths, bert_sentences, bert_sentence_types, bert_sentence_att_mask = batch
+        visual, acoustic, sentences, labels = batch 
+        batch1 = [feat_aug(visual).to(device), feat_aug(acoustic).to(device), sentence_aug(sentences)] #, bert_sentences.to(device), bert_sentence_types.to(device), bert_sentence_att_mask.to(device), lengths.to('cpu')]
+        batch2 = [feat_aug(visual).to(device), feat_aug(acoustic).to(device), sentence_aug(sentences)] #, bert_sentences.to(device), bert_sentence_types.to(device), bert_sentence_att_mask.to(device), lengths.to('cpu')]
     else:
         raise ValueError("Invalid aug")
-    batch = [b.to('cpu') for b in batch] if not torch.is_tensor(batch) else batch.to('cpu') 
+    # batch = [b.to('cpu') for b in batch] if not torch.is_tensor(batch) else batch.to('cpu') 
     return batch1, batch2
 
 def _info_critic_acc(scores, device):
@@ -191,7 +245,7 @@ def _info_critic_acc(scores, device):
 #     loss = sum(losses) / len(losses)
 #     return loss
 
-def _info_critic_single_modality(model, batch1, batch2, temperature, device, acc=False):
+def _info_critic_single_modality(model, batch1, batch2, device, acc=False, **kwargs):
     scores = []
     u = model(batch1)
     v = model(batch2)
@@ -208,7 +262,7 @@ def _info_critic_single_modality(model, batch1, batch2, temperature, device, acc
     loss += F.cross_entropy(score_1, torch.empty(score_1.shape[0], dtype=torch.long).fill_(1).to(device), reduction='mean')
     return loss
 
-def info_critic(model, batch1, batch2, temperature, device, acc=False):
+def info_critic(model, batch1, batch2, device, acc=False, **kwargs):
     try:
         encode_batch = model.encode_batch
     except AttributeError:
@@ -216,7 +270,7 @@ def info_critic(model, batch1, batch2, temperature, device, acc=False):
 
     num_modalities = len(batch1) if not torch.is_tensor(batch1) else 1
     if num_modalities == 1:
-        return _info_critic_single_modality(model, batch1, batch2, temperature, device, acc)
+        return _info_critic_single_modality(model, batch1, batch2, device, acc)
     to_disturb = generate_binary_combinations(num_modalities)
     # Create u, the anchors
     u = model(batch1)
@@ -226,7 +280,7 @@ def info_critic(model, batch1, batch2, temperature, device, acc=False):
         scores = []
     loss = 0
     for i, disturb in enumerate(to_disturb):
-        v = [batch2[i].roll(1, 0) if disturb[i] else batch2[i] for i in range(num_modalities)]
+        v = [batch2[j].roll(1, 0) if disturb[j] else batch2[j] for j in range(num_modalities)]
         if encode_batch:
             v = model.fuse(v)
         else:
@@ -424,14 +478,14 @@ def decomposed_loss(model, batch1, batch2, temperature, device, acc=False):
     return loss
    
 
-def SimCLR_loss(model, batch1, batch2, temperature, device, acc=False):
+def SimCLR_loss(model, batch1, batch2, device, acc=False, temperature=1, **kwargs):
     batch_size = batch1[0].shape[0] if isinstance(batch1, (tuple, list)) else batch1.shape[0]
     LARGE_NUM = 1e9
 
-    batch1 = [b.to(device) for b in batch1] if not torch.is_tensor(batch1) else batch1.to(device)
+    batch1 = [b.to(device) if torch.is_tensor(b) else b for b in batch1] if not torch.is_tensor(batch1) else batch1.to(device)
     y1 = model(batch1)
 
-    batch2 = [b.to(device) for b in batch2] if not torch.is_tensor(batch2) else batch2.to(device)
+    batch2 = [b.to(device) if torch.is_tensor(b) else b for b in batch2] if not torch.is_tensor(batch2) else batch2.to(device)
     y2 =  model(batch2)
 
     masks = F.one_hot(torch.arange(batch_size), num_classes=batch_size).float().to(device)
@@ -465,15 +519,15 @@ def SimCLR_loss(model, batch1, batch2, temperature, device, acc=False):
 
 def get_train_accuracy(model, batch1, batch2, est, device):
     if est == 'info_critic':
-        accs = info_critic(model, batch1, batch2, 1, device, acc=True)
+        accs = info_critic(model, batch1, batch2, device, acc=True)
     elif est == 'info_critic_plus':
-        accs = info_critic_plus(model, batch1, batch2, 1, device, acc=True)
+        accs = info_critic_plus(model, batch1, batch2, device, acc=True)
     elif est == 'prob_loss':
-        accs = prob_loss(model, batch1, batch2, 1, device, acc=True)
+        accs = prob_loss(model, batch1, batch2, device, acc=True)
     elif est == 'decomposed_loss':
-        accs = decomposed_loss(model, batch1, batch2, 1, device, acc=True)
+        accs = decomposed_loss(model, batch1, batch2, device, acc=True)
     elif est == 'SimCLR':
-        accs = SimCLR_loss(model, batch1, batch2, 1, device, acc=True)
+        accs = SimCLR_loss(model, batch1, batch2, device, acc=True)
     else:
         raise Exception('Unknown estimation method')
     return accs
