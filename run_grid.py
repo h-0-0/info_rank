@@ -84,9 +84,9 @@ if  __name__ == "__main__":
     print("Searching Over: ", config, flush=True)
     if args.benchmark == 'written_spoken_digits':
         grid = slune.searchers.SearcherGrid(config, runs=10)
-    elif (args.benchmark == 'written_spoken_digits_weak_image') or (args.benchmark == 'written_spoken_digits_weak_audio'):
+    elif (args.benchmark == 'written_spoken_digits_weak_image') or (args.benchmark == 'written_spoken_digits_weak_audio') or (args.benchmark == 'written_spoken_digits_noisy_pairing'):
         config['sigma'] = [args.sigma]
-        grid = slune.searchers.SearcherGrid(config, runs=10)
+        grid = slune.searchers.SearcherGrid(config, runs=20)
     else:
         grid = slune.searchers.SearcherGrid(config, runs=1)
     # grid.check_existing_runs(slune.get_csv_saver(root_dir='results'))
