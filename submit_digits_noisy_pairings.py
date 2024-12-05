@@ -3,7 +3,7 @@ import slune
 if  __name__ == "__main__":    
     base_config = {
         'benchmark': ['written_spoken_digits_noisy_pairing'],
-        'sigma': [0.01, 0.02, 0.04, 0.08, 0.10, 0.5],
+        'sigma': [0.01, 0.02, 0.04, 0.08, 0.10, 0.2, 0.3, 0.4, 0.5, 0.6],
         'num_epochs': [200],
         'batch_size': [128],
         'patience': [15],
@@ -28,7 +28,7 @@ if  __name__ == "__main__":
     supervised = {
         'est': ['supervised'],
         'model': ['FusionModel'],
-        'learning_rate': [5e-3, 1e-3, 5e-4],
+        'learning_rate': [1e-3],
         'temperature' : [1],
         'output_dim': [64],
     }
