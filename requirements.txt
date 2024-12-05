@@ -15,3 +15,7 @@ h5py
 pillow
 accelerate
 torchmetrics
+
+transformers
+validators
+colorama
