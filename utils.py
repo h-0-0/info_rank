@@ -1,5 +1,11 @@
 import torch
+import os 
+import pickle
 
+def load_pickle(path):
+    with open(path, 'rb') as f:
+        return pickle.load(f)
+    
 def dict_to_ls(**kwargs):
     formatted_args = []
 
@@ -146,10 +152,17 @@ def get_batch_labels(modality, batch, device):
         elif modality == 'audio':
             modality1, labels = modality1.to(device), labels.to(device)
             batch = modality1
-    elif modality == 'image_ft+audio_ft+text':
+    elif modality in ['image_ft+audio_ft+text', 'image_ft+text']:
         modality0, modality1, modality2, labels = batch
         modality0, modality1, modality2, labels = modality0.to(device), modality1.to(device), modality2.to(device), labels.to(device)
         batch = (modality0, modality1, modality2)
+    elif modality == 'image_ft+audio_ft+text_bert':
+        # sentences, visual, acoustic, labels, lengths, bert_sentences, bert_sentence_types, bert_sentence_att_mask = batch
+        # sentences, visual, acoustic, bert_sentences, bert_sentence_types, bert_sentence_att_mask, lengths, labels = sentences.to(device), visual.to(device), acoustic.to(device), bert_sentences.to(device), bert_sentence_types.to(device), bert_sentence_att_mask.to(device), lengths.to('cpu'), labels.to(device)
+        # batch = (visual, acoustic, sentences, bert_sentences, bert_sentence_types, bert_sentence_att_mask, lengths)
+        visual, acoustic, sentences, labels = batch
+        visual, acoustic, sentences, labels = visual.to(device), acoustic.to(device), sentences, labels.to(device)
+        batch = (visual, acoustic, sentences)
     else:
         raise ValueError("Invalid modality")
     return batch, labels
@@ -256,7 +269,7 @@ def get_torchmetrics(modality, num_classes, device):
 
         metrics['acc'] = accuracy
         metrics['IoU'] = jaccard
-    elif modality == 'image_ft+audio_ft+text':
+    elif modality in ['image_ft+audio_ft+text', 'image_ft+text', 'image_ft+audio_ft+text_bert']:
         mse = torchmetrics.MeanSquaredError().to(device)
         seven_accuracy = CustomSevenAccuracy().to(device)
         binary_accuracy = CustomBinaryAccuracy().to(device)
@@ -275,7 +288,7 @@ def get_torchmetrics(modality, num_classes, device):
 from model import FusionModel, ImageModel, AudioModel, ResNet101, ResNet50, FullConvNet, MosiFusion, MoseiFusion, ESANet_18, MosiTransformer
 from misa_model import MISA
 from mult_model import MULTModel
-def get_model(model, output_dim):
+def get_model(model, benchmark, output_dim):
     if model == "FusionModel":
         model = FusionModel(output_dim=output_dim)
         modality = 'image+audio'
@@ -313,11 +326,21 @@ def get_model(model, output_dim):
         model = MoseiFusion(output_dim=output_dim, attention=True)
         modality = 'image_ft+audio_ft+text'
     elif model == "MosiMISA":
-        model = MISA('mosi', output_dim=output_dim)
-        modality = 'image_ft+audio_ft+text'
+        model = MISA('mosi', output_dim=128, use_bert=True)
+        if benchmark == 'mosi_bert':
+            modality = 'image_ft+audio_ft+text_bert'
+        elif benchmark == 'mosi':
+            modality = 'image_ft+audio_ft+text'
+        else: 
+            raise ValueError("Invalid benchmark for MosiMISA")
     elif model == "MoseiMISA":
-        model = MISA('mosei', output_dim=output_dim)
-        modality = 'image_ft+audio_ft+text'
+        model = MISA('mosei', output_dim=128, use_bert=True)
+        if benchmark == 'mosei_bert':
+            modality = 'image_ft+audio_ft+text_bert'
+        elif benchmark == 'mosei':
+            modality = 'image_ft+audio_ft+text'
+        else: 
+            raise ValueError("Invalid benchmark for MoseiMISA")
     elif model == "MosiMULT":
         model = MULTModel('mosi', output_dim=output_dim)
         modality = 'image_ft+audio_ft+text'
@@ -327,6 +350,9 @@ def get_model(model, output_dim):
     elif model == "MosiTransformer":
         model = MosiTransformer()
         modality = 'image_ft+audio_ft+text'
+    elif model == "MosiTransformer_NoAudio":
+        model = MosiTransformer(no_audio=True)
+        modality = 'image_ft+text'
     else:
         raise ValueError("Invalid model")
     return model, modality
@@ -374,8 +400,6 @@ class SegCrossEntropyLoss(nn.Module):
 
         # return losses
 
-import os 
-import pickle
 def compute_class_weights(data_loader, weight_mode='median_frequency', c=1.02, n_classes_with_void=13, source_path='data', split='train'):
         assert weight_mode in ['median_frequency', 'logarithmic', 'linear']
         n_classes_without_void = n_classes_with_void - 1
@@ -451,8 +475,12 @@ def get_classifier_criterion(model_name, output_dim, benchmark, train_loader, de
             raise ValueError("Invalid benchmark and model combination")
         classifier = SegClassifier(num_classes)
         criterion = nn.CrossEntropyLoss()
-    elif model_name in ["MosiFusion", "MoseiFusion", "MosiMISA", "MoseiMISA", "MosiFusionAttention", "MoseiFusionAttention", "MosiMULT", "MoseiMULT", "MosiTransformer"]:
-        classifier = Regression(input_dim=output_dim)
+    elif model_name in ["MosiFusion", "MoseiFusion", "MosiMISA", "MoseiMISA", "MosiFusionAttention", "MoseiFusionAttention", "MosiMULT", "MoseiMULT", "MosiTransformer", "MosiTransformer_NoAudio"]:
+        if model_name in ["MosiMISA", "MoseiMISA"]:
+            out_dropout=0.5
+        else: 
+            out_dropout=0.0
+        classifier = Regression(input_dim=output_dim, out_dropout=out_dropout)
         if model_name in ["MosiMULT", "MoseiMULT"]:
             criterion = nn.L1Loss()
         else:
