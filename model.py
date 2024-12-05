@@ -610,12 +610,12 @@ class MoseiFusion(nn.Module):
 
 class Regression(nn.Module):
     """ TODO """
-    def __init__(self, input_dim):
+    def __init__(self, input_dim, out_dropout=0.0):
         super().__init__()
         self.input_dim = input_dim
         self.output_dim = 1
         self.num_classes = 1
-        self.out_dropout = 0.0
+        self.out_dropout = out_dropout
         # Define MLP
         # self.layer = nn.Sequential(
         #     nn.Linear(self.input_dim, self.input_dim//2),
@@ -753,9 +753,9 @@ class Transformer(nn.Module):
         return x
 
 class MosiTransformer(nn.Module):
-    def __init__(self):
+    def __init__(self, no_audio=False):
         super(MosiTransformer, self).__init__()
-
+        self.no_audio = no_audio
         self.vision_encoder = Transformer(35, 70)
         self.audio_encoder = Transformer(74, 150)
         self.text_encoder = Transformer(300, 600)
@@ -782,10 +782,38 @@ class MosiTransformer(nn.Module):
         self.fusion_mlp = nn.Sequential(
             nn.Identity(),
         )
-        self.output_dim = self.vision_encode_dim + self.audio_encode_dim + self.text_encode_dim
+        if no_audio:
+            self.output_dim = self.vision_encode_dim + self.text_encode_dim
+        else:
+            self.output_dim = self.vision_encode_dim + self.audio_encode_dim + self.text_encode_dim
+        if no_audio:
+            num_critics = 3
+            critic_pred_dim = 4
+        else:
+            num_critics = 7
+            critic_pred_dim = 8
         self.critic = nn.Sequential(
-            nn.Linear(self.output_dim*2, 8),
+            nn.Linear(num_critics, critic_pred_dim),
         )
+        def mlp(dim, hidden_dim, output_dim, layers, activation):
+            activation = {
+                'relu': nn.ReLU,
+                'tanh': nn.Tanh,
+            }[activation]
+
+            seq = [nn.Linear(dim, hidden_dim), activation()]
+            for _ in range(layers):
+                seq += [nn.Linear(hidden_dim, hidden_dim), activation()]
+            seq += [nn.Linear(hidden_dim, output_dim)]
+
+            return nn.Sequential(*seq)
+        self.vision_audio_text_critic = mlp(2*(self.vision_encode_dim+self.audio_encode_dim+self.text_encode_dim), 512, 1, 1, 'relu')
+        self.vision_text_critic = mlp(2*(self.vision_encode_dim+self.text_encode_dim), 512, 1, 1, 'relu')
+        self.audio_text_critic = mlp(2*(self.audio_encode_dim+self.text_encode_dim), 512, 1, 1, 'relu')
+        self.vision_audio_critic = mlp(2*(self.vision_encode_dim+self.audio_encode_dim), 512, 1, 1, 'relu')
+        self.vision_vision_critic = mlp(self.vision_encode_dim*2, 512, 1, 1, 'relu')
+        self.audio_audio_critic = mlp(self.audio_encode_dim*2, 512, 1, 1, 'relu')
+        self.text_text_critic = mlp(self.text_encode_dim*2, 512, 1, 1, 'relu')
 
     def forward(self, batch):
         image, audio, text = batch
@@ -793,19 +821,57 @@ class MosiTransformer(nn.Module):
         image_repr = self.vision_encoder(image)
         image_repr = self.vision_proj(image_repr)
 
-        audio_repr = self.audio_encoder(audio)
-        audio_repr = self.audio_proj(audio_repr)
+        if not self.no_audio:
+            audio_repr = self.audio_encoder(audio)
+            audio_repr = self.audio_proj(audio_repr)
 
         text_repr = self.text_encoder(text)
         text_repr = self.text_proj(text_repr)
 
-        fused_repr = torch.cat((image_repr, audio_repr, text_repr), dim=1)
+        if self.no_audio:
+            fused_repr = torch.cat((image_repr, text_repr), dim=1)
+        else:
+            fused_repr = torch.cat((image_repr, audio_repr, text_repr), dim=1)
         output = self.fusion_mlp(fused_repr)
         return output
 
     def score(self, u, v):
-        concat = torch.cat((u, v), dim=1)
-        return self.critic(concat)
+        if self.no_audio:
+            vision = torch.cat((u[:,0:self.vision_encode_dim], v[:,0:self.vision_encode_dim]), dim=1)
+            text = torch.cat((u[:,self.vision_encode_dim:], v[:,self.vision_encode_dim:]), dim=1)
+        else: 
+            vision = torch.cat((u[:,0:self.vision_encode_dim], v[:,0:self.vision_encode_dim]), dim=1)
+            audio = torch.cat((u[:,self.vision_encode_dim:self.vision_encode_dim+self.audio_encode_dim], v[:,self.vision_encode_dim:self.vision_encode_dim+self.audio_encode_dim]), dim=1)
+            text = torch.cat((u[:,self.vision_encode_dim+self.audio_encode_dim:], v[:,self.vision_encode_dim+self.audio_encode_dim:]), dim=1)
+        # First vision, audio, text critic
+        if not self.no_audio:  
+            vision_audio_text = torch.cat((vision, audio, text), dim=1)
+            vision_audio_text_score = self.vision_audio_text_critic(vision_audio_text)
+        # Second vision, text critic
+        vision_text = torch.cat((vision, text), dim=1)
+        vision_text_score = self.vision_text_critic(vision_text)
+        # Third audio, text critic
+        if not self.no_audio:
+            audio_text = torch.cat((audio, text), dim=1)
+            audio_text_score = self.audio_text_critic(audio_text)
+        # Fourth vision, audio critic
+        if not self.no_audio:
+            vision_audio = torch.cat((vision, audio), dim=1)
+            vision_audio_score = self.vision_audio_critic(vision_audio)
+        # Fifth vision critic
+        vision_vision_score = self.vision_vision_critic(vision)
+        # Sixth audio critic
+        if not self.no_audio:
+            audio_audio_score = self.audio_audio_critic(audio)
+        # Seventh text critic
+        text_text_score = self.text_text_critic(text)
+        
+        if self.no_audio:
+            concat = torch.cat((vision_text_score, vision_vision_score, text_text_score), dim=1)
+        else:
+            concat = torch.cat((vision_audio_text_score, vision_text_score, audio_text_score, vision_audio_score, vision_vision_score, audio_audio_score, text_text_score), dim=1)
+        scores = self.critic(concat)
+        return scores
 
 if __name__ == '__main__':
     print(MNIST_Image_CNN())
